@@ -1,0 +1,95 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Sao's Library</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Newsreader:ital,wght@0,400;0,500;0,600;1,400&family=JetBrains+Mono:wght@400;500;600&family=Archivo+Narrow:wght@400;500;600;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <style>
+    html, body { margin: 0; padding: 0; height: 100%; overflow: hidden; background: #1a1b20;
+                 font-family: -apple-system, BlinkMacSystemFont, 'Inter', 'Segoe UI', system-ui, sans-serif;
+                 color: #e9eaf0; -webkit-font-smoothing: antialiased; }
+    #root { width: 100%; height: 100%; }
+    * { box-sizing: border-box; }
+    /* iOS-style dark scrollbars — mirrors tend-ios-export's .ios scope. */
+    ::-webkit-scrollbar { width: 11px; height: 11px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: rgba(255,255,255,.11); border-radius: 8px;
+                                border: 3px solid transparent; background-clip: padding-box; }
+    ::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,.2); background-clip: padding-box; }
+
+    /* Native-app feel — no random web-page text selection of chrome
+       labels.  Editors, chat messages, preview text, and the command
+       palette opt back in via .v3-selectable. */
+    body { -webkit-user-select: none; user-select: none; cursor: default; }
+    textarea, input, .v3-selectable, .v3-selectable * {
+      -webkit-user-select: text; user-select: text;
+    }
+
+    /* No images or links get drag-image previews — those are very
+       webpage-like.  Only opt-in elements (the library map's books,
+       sidebar files for reorder) will set draggable=true themselves. */
+    img, svg, a { -webkit-user-drag: none; }
+
+    /* Re-pinned to 1.0 — the global zoom was breaking right/bottom
+       overflow (viewport stays the same while the content scales up)
+       and throwing off the library map's mouse coordinate math.
+       We'll do a proper per-component font-size bump instead. */
+    html { zoom: 1 !important; }
+
+    /* Splash shown until React mounts.  Visually matches the XV3_Loading
+       screen (cream paper, big serif "library hub.") so there's no jump
+       when React takes over and the real loading view appears. */
+    #splash {
+      position: fixed; inset: 0;
+      background: #1a1b20;
+      display: flex; align-items: center; justify-content: center;
+      flex-direction: column; gap: 24px;
+      font-family: -apple-system, BlinkMacSystemFont, 'Inter', system-ui, sans-serif;
+      z-index: 999;
+    }
+    #splash .sp-title {
+      font-size: 56px; line-height: 0.9; font-weight: 700;
+      letter-spacing: -0.04em; color: #e9eaf0;
+    }
+    #splash .sp-title .sp-dot { color: #6f8cd6; }
+    #splash .sp-bar {
+      width: 240px; height: 3px; background: rgba(255,255,255,0.08);
+      position: relative; border-radius: 2px; overflow: hidden;
+    }
+    #splash .sp-bar::after {
+      content: ''; position: absolute; left: 0; top: 0; height: 100%;
+      background: #6f8cd6; border-radius: 2px;
+      animation: sp-fill 1.4s ease-in-out infinite;
+    }
+    @keyframes sp-fill {
+      0%   { width: 0%;   }
+      50%  { width: 64%;  }
+      100% { width: 100%; }
+    }
+  </style>
+</head>
+<body>
+  <div id="splash">
+    <div class="sp-title">library hub<span class="sp-dot">.</span></div>
+    <div class="sp-bar"></div>
+  </div>
+  <div id="root"></div>
+
+  <!-- Vendored locally (was unpkg CDN).  Loading these over the network on
+       every launch was the main cause of slow window-open — and broke the hub
+       entirely with no internet.  Local file:// loads are instant + offline. -->
+  <script src="vendor/react.production.min.js"></script>
+  <script src="vendor/react-dom.production.min.js"></script>
+  <script src="vendor/babel.min.js"></script>
+  <!-- All legacy JSX (sprites, xv3-*, xv4-*, direction-3-v3 ≈ 14 000 lines)
+       plus marked.js / highlight.js / xv3-styles.css have been STRIPPED.
+       IOSApp owns the whole UI and only depends on React + the bridge, so
+       Babel-standalone has 99% less code to transform — hub loads in well
+       under a second instead of several. -->
+  <script type="text/babel" src="xv5-ios-app.jsx?v=132"></script>
+  <script type="text/babel" src="app-library.jsx?v=132"></script>
+</body>
+</html>

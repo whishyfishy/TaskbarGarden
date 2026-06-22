@@ -1,0 +1,74 @@
+__pycache__/
+*.py[cod]
+*.pyo
+.pytest_cache/
+*.egg-info/
+dist/
+build/
+.venv/
+venv/
+*.log
+
+# Per-user runtime state
+user_profile.json
+desktop_cat/pomodoro.json
+desktop_cat/message_board.json
+desktop_cat/library_config.json
+
+# Synthesized sound effects (regenerated at runtime)
+desktop_cat/sprites/sounds/
+
+# Secrets — never commit
+.env
+
+# Node tooling for the Library Hub build step (scripts/build_library.js)
+node_modules/
+package-lock.json
+
+# Library Hub build artifacts — regenerated from .jsx by build_library.js
+desktop_cat/web/library/*.compiled.js
+
+# Claude Code worktrees (per-agent scratch)
+.claude/worktrees/
+.claude/settings.local.json
+
+# ── Internal dev/working docs — kept locally, not published ──
+CLAUDE.md
+plan.md
+Build Log.md
+DESIGN_NOTES.md
+Development History.md
+System Design.md
+SPRITE_INTEGRATION.md
+SESSION_HANDOFF_2026-05-20.md
+
+# ── Per-user runtime state (regenerated with defaults on first run) ──
+library_todos.json
+sao_collection.json
+stats.json
+decor.json
+blocks.json
+desktop_cat/island.json
+desktop_cat/canvas_sync.json
+desktop_cat/stickies.json
+desktop_cat/garden.json
+desktop_cat/inventory.json
+desktop_cat/task_flowers.json
+desktop_cat/world_settings.json
+desktop_cat/_theme.json
+desktop_cat/clipboard.json
+desktop_cat/hut_position.json
+desktop_cat/hub_pos.json
+
+# ── Dev scratch / debug artifacts ──
+diagnose_children.py
+flower_stages_preview.py
+debug_sprite_dump.py
+debug_sprite_dump.png
+grid_debug.png
+t_due.png
+t_timer.png
+Sao.lnk
+_design_drop/
+_design_drop_v2/
+_design_drop_v4/

@@ -1,0 +1,15 @@
+PyQt6==6.10.2
+PyQt6-WebEngine==6.11.0   # the Library Hub UI runs in a QWebEngineView
+pywin32==311
+watchdog==6.0.0
+
+# UI Automation — lets us read individual taskbar-icon positions (Win32 can't
+# on Win11).  Used so Sao can walk into a real app icon to "work".  Degrades
+# gracefully (she just won't do the taskbar-enter behaviour) if missing.
+uiautomation==2.0.29
+
+# Optional — used only by the dynamic island's music lane.
+# Reads Windows' System Media Transport Controls so we can show whatever's
+# playing across Spotify / Chrome tabs / YouTube / etc.  The island
+# degrades gracefully (music lane just hides) if this isn't installed.
+winsdk==1.0.0b10
