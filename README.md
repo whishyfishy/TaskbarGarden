@@ -7,16 +7,15 @@ and is wrapped around a tiny productivity hub.
 
 > Windows only. Tuned for a single monitor.
 
+### [⬇️ Download Sao for Windows](https://github.com/whishyfishy/TaskbarGarden/releases/download/v1.0/Sao-v1.0.zip)
+
+[![Download Sao v1.0](https://img.shields.io/badge/⬇%20Download%20Sao%20v1.0-Windows-2ea44f?style=for-the-badge)](https://github.com/whishyfishy/TaskbarGarden/releases/download/v1.0/Sao-v1.0.zip)
+
+*One click downloads the zip — unzip anywhere and run `Sao.exe`. No Python needed.*
+*(Windows SmartScreen may warn about an unknown publisher — normal for unsigned apps — click **More info → Run anyway**.)*
+
 <!-- Demo GIF: drop a short screen recording at docs/demo.gif and it shows here. -->
 ![Sao walking across the taskbar](docs/demo.gif)
-
-## ⬇️ Download
-
-Grab the latest build from the **[Releases page](../../releases)** — unzip it
-anywhere and run `Sao.exe`. No Python install needed. Windows only.
-
-> Windows SmartScreen may warn about an unknown publisher (normal for unsigned
-> apps): click **More info → Run anyway**.
 
 ## What it does
 
