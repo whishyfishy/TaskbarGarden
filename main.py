@@ -369,6 +369,48 @@ def main():
     overlay = CatOverlay(debug=args.debug)
     overlay.setGeometry(app.primaryScreen().geometry())
     overlay.show()
+
+    # ── DPI diagnostic ────────────────────────────────────────────────────
+    # Writes the scaling/geometry values to ~/sao_dpi_debug.log so a misbehaving
+    # machine (e.g. wrong size / everything in a corner) can be diagnosed without
+    # reproducing it here.  Harmless on a healthy setup.
+    try:
+        import platform as _plat
+        _u32 = ctypes.windll.user32
+        _L = [f"Sao DPI debug — {_plat.platform()}  frozen={getattr(sys,'frozen',False)}"]
+        try:
+            _ctx = _u32.GetThreadDpiAwarenessContext()
+            _L.append(f"awareness={_u32.GetAwarenessFromDpiAwarenessContext(_ctx)} "
+                      f"(0=unaware 1=system 2=permon 3=permon_v2)")
+        except Exception as _e:
+            _L.append(f"awareness query failed: {_e}")
+        try:
+            _L.append(f"GetDpiForSystem={_u32.GetDpiForSystem()}")
+        except Exception:
+            pass
+        _L.append(f"SM_CXSCREEN/CYSCREEN = {_u32.GetSystemMetrics(0)} x {_u32.GetSystemMetrics(1)}")
+        _L.append(f"SPI_GETWORKAREA raw (l,t,r,b) = {_get_work_area_physical()}")
+        _L.append(f"computed: dpi_ratio={dpi_ratio} screen_w={screen_w} "
+                  f"screen_floor={screen_floor} screen_h={screen_h} "
+                  f"phys_screen={phys_screen_w}x{phys_screen_h}")
+        _ps = app.primaryScreen()
+        _L.append(f"primaryScreen name={_ps.name()} geom={_ps.geometry().getRect()} "
+                  f"avail={_ps.availableGeometry().getRect()} dpr={_ps.devicePixelRatio()} "
+                  f"ldpi={_ps.logicalDotsPerInch()} pdpi={_ps.physicalDotsPerInch()}")
+        for _i, _s in enumerate(app.screens()):
+            _L.append(f"screen[{_i}] name={_s.name()} geom={_s.geometry().getRect()} "
+                      f"dpr={_s.devicePixelRatio()} ldpi={_s.logicalDotsPerInch()}")
+        _L.append(f"overlay geom={overlay.geometry().getRect()} "
+                  f"frame={overlay.frameGeometry().getRect()} dpr={overlay.devicePixelRatioF()}")
+        try:
+            _L.append(f"rounding_policy={app.highDpiScaleFactorRoundingPolicy()}")
+        except Exception:
+            pass
+        with open(os.path.join(os.path.expanduser('~'), 'sao_dpi_debug.log'),
+                  'w', encoding='utf-8') as _df:
+            _df.write("\n".join(str(_x) for _x in _L) + "\n")
+    except Exception:
+        pass
     # Expose the overlay to the hub bridge (e.g. hover-a-todo → highlight flower).
     try:
         from desktop_cat import pin_registry as _pin_reg
