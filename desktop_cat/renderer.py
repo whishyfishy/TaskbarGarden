@@ -645,7 +645,10 @@ class CatOverlay(QWidget):
         try:
             cur = self.mapFromGlobal(QCursor.pos())
             cx  = float(cur.x())
-            if fy > 0 and abs(cur.y() - fy) < 30:   # cursor down at grass level
+            # The blades stand up to ~28 px above the floor, so let the cursor
+            # rustle them from higher up (over the tips), not just right at the
+            # floor line.
+            if fy > 0 and (fy - 34) <= cur.y() <= (fy + 8):
                 dxc = cx - self._prev_cursor_x
                 if abs(dxc) > 1.5:
                     disturbers.append((cx, 1.0 if dxc > 0 else -1.0,
@@ -3570,7 +3573,7 @@ class CatOverlay(QWidget):
         n = len(frames)
         frame_idx = int(sn.anim_phase / (2 * math.pi) * n) % n
         frame = frames[frame_idx]
-        scale = 0.7
+        scale = 0.91   # ~30% bigger than the old 0.7
         sw = int(frame.width()  * scale)
         sh = int(frame.height() * scale)
         cx = int(sn.x) - sw // 2

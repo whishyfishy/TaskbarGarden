@@ -260,9 +260,10 @@ def pick_jump_target(cat: CatState, platforms: list[Platform],
             continue
 
         score = -dy + (JUMP_HORIZONTAL_RANGE - dx) * 0.3
-        # Bias her toward jumping onto placed blocks so they're fun to build on.
+        # Strongly bias her toward jumping onto placed blocks (so they easily
+        # beat window ledges) — they're meant to be fun to build on.
         if blocks_data.is_block_hwnd(p.hwnd):
-            score += 120
+            score += 400
         candidates.append((score, p))
 
     if not candidates:
@@ -2444,8 +2445,19 @@ def main():
                 if macaron['state'] == 'falling':
                     macaron['vy'] = min(22.0, macaron['vy'] + 1.2)
                     macaron['y'] += macaron['vy']
-                    if macaron['y'] >= screen_floor:
-                        macaron['y']  = float(screen_floor)
+                    # Land on the highest surface under it — a block top in the
+                    # same column, or the floor.
+                    _land = float(screen_floor)
+                    if blocks:
+                        _mcol = math.floor(macaron['x'] / blocks_data.BLOCK_SIZE)
+                        for (_bc, _br) in blocks:
+                            if _bc != _mcol:
+                                continue
+                            _bt = float(screen_floor - (_br + 1) * blocks_data.BLOCK_SIZE)
+                            if macaron['y'] >= _bt and _bt < _land:
+                                _land = _bt
+                    if macaron['y'] >= _land:
+                        macaron['y']  = _land
                         macaron['vy'] = 0.0
                         macaron['state'] = 'resting'
             macaron['x'] = max(8.0, min(float(screen_w - 8), macaron['x']))
@@ -2555,15 +2567,15 @@ def main():
                 _feet = cat.y + cat.height
                 for (c, r) in blocks:
                     bx, by, bw, bh = blocks_data.cell_rect(c, r, screen_floor)
-                    if (abs((bx + bw / 2) - _scx) < 170
+                    if (abs((bx + bw / 2) - _scx) < 210
                             and -12 < (_feet - by) < JUMP_MAX_HEIGHT):
                         _block_near = True
                         break
-            jump_ticks += 5 if _block_near else 1
-            _thresh = (JUMP_CONSIDER_TICKS // 4) if _block_near else JUMP_CONSIDER_TICKS
+            jump_ticks += 9 if _block_near else 1
+            _thresh = (JUMP_CONSIDER_TICKS // 8) if _block_near else JUMP_CONSIDER_TICKS
             if jump_ticks >= _thresh:
                 jump_ticks = 0
-                if random.random() < (0.7 if _block_near else JUMP_CHANCE):
+                if random.random() < (0.88 if _block_near else JUMP_CHANCE):
                     # If a fullscreen window covers the screen, skip jumping (edges are now walls)
                     if has_fullscreen_window(scanner.z_order, phys_screen_w, phys_screen_h):
                         pass   # walk-around disabled — edges are walls
