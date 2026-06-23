@@ -1213,18 +1213,22 @@ def main():
 
     # ── Placeable blocks (2D-Minecraft) ───────────────────────────────────
     blocks = blocks_data.load_blocks()   # {(c, r): style}, mutated by the overlay
+    _block_plats: list = []              # cached merged collision platforms
+    _blocks_dirty = [True]               # rebuild the cache only when blocks change
     def _save_blocks() -> None:
         blocks_data.save_blocks(blocks)
+        _blocks_dirty[0] = True
     overlay.set_blocks(blocks)
     overlay._on_blocks_changed = _save_blocks
     block_r_was_down = [False]            # edge-detect the R key while placing
 
-    def _build_block_platforms() -> list:
-        """Square blocks → collision platforms.  Horizontally-adjacent blocks in
-        the same row are merged into one wide platform so Sao walks across a row
-        smoothly instead of catching on every seam."""
-        if not blocks:
-            return []
+    def _get_block_platforms() -> list:
+        """Square blocks → collision platforms (cached; rebuilt only when blocks
+        change).  Horizontally-adjacent blocks in a row merge into one wide
+        platform so Sao walks across a row smoothly instead of catching seams."""
+        if not _blocks_dirty[0]:
+            return _block_plats
+        _blocks_dirty[0] = False
         from collections import defaultdict
         by_row: dict = defaultdict(list)
         for (c, r) in blocks:
@@ -1243,7 +1247,8 @@ def main():
                                     x=x, y=y, w=w, h=h, solid=True))
                 if c is not None:
                     run_start = prev = c
-        return out
+        _block_plats[:] = out
+        return _block_plats
 
     # Pomodoro window — created once, shown/hidden on demand
     pomodoro_win = PomodoroWindow()
@@ -1824,8 +1829,9 @@ def main():
             _vis_platforms = platforms
         # Placed blocks are always solid (she can stand/jump on them even when
         # they're faded out), so add them as platforms unless fully covered.
-        if blocks and not _has_fullscreen:
-            _vis_platforms = _vis_platforms + _build_block_platforms()
+        _block_plats_now = _get_block_platforms() if (blocks and not _has_fullscreen) else []
+        if _block_plats_now:
+            _vis_platforms = _vis_platforms + _block_plats_now
 
         # While in block mode, R cycles the style being placed (polled globally;
         # only active during placement so it doesn't shadow normal typing).
@@ -2579,10 +2585,9 @@ def main():
             if blocks:
                 _scx  = cat.x + cat.width / 2
                 _feet = cat.y + cat.height
-                for (c, r) in blocks:
-                    bx, by, bw, bh = blocks_data.cell_rect(c, r, screen_floor)
-                    if (abs((bx + bw / 2) - _scx) < 210
-                            and -12 < (_feet - by) < JUMP_MAX_HEIGHT):
+                for _bp in _get_block_platforms():
+                    if (abs((_bp.x + _bp.w / 2) - _scx) < 210
+                            and -12 < (_feet - _bp.top) < JUMP_MAX_HEIGHT):
                         _block_near = True
                         break
             jump_ticks += 9 if _block_near else 1
