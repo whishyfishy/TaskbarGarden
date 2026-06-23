@@ -1119,6 +1119,15 @@ function IOSSettingsScreen({ bridge, onSyncCanvas, syncMsg, light, setLight }) {
           <Switch on={!!(world && world.greenbeans)}
             onClick={() => patchWorld({ greenbeans: !(world && world.greenbeans) })} />
         </Row>
+        <Row k="Feed Sao 🍪" sub="Drops a macaron on the desktop — drag it near her and she'll chase & eat it">
+          <button
+            onClick={() => { try { bridge && bridge.feedMacaron && bridge.feedMacaron(); } catch (e) {} }}
+            style={{ background: 'linear-gradient(135deg,#f4b9d6,#e58fb6)', color: '#5a2a40',
+                     border: 'none', borderRadius: 10, padding: '6px 14px', fontWeight: 700,
+                     fontSize: 13, cursor: 'pointer' }}>
+            Drop treat
+          </button>
+        </Row>
       </Grp>
 
       <Grp label="Window pinning">

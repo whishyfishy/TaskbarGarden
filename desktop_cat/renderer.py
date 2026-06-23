@@ -139,6 +139,7 @@ DEBUG_BOT_EDGE_COLOR  = QColor(255, 180, 0)    # orange — bottom ledge line
 DEBUG_TEXT_COLOR      = QColor(255, 255, 255)
 
 HIT_RADIUS = 24        # px — how close the cursor must be to the cat centre to grab it
+MACARON_HIT = 16       # px — grab radius for the draggable macaron treat
 _CAT_DRAW_SCALE = 1.08 # Sao rendered 8 % larger than her physics footprint
 
 # Default sprite folder: desktop_cat/sprites/ next to this file
@@ -281,6 +282,13 @@ class CatOverlay(QWidget):
         # Napping — sleepy Z's drift up off her head.
         self._napping: bool = False
         self._nap_phase: float = 0.0
+        # Macaron treat (fed from the hub).  main owns its logic; the overlay
+        # draws it + lets the user drag it around like Sao.
+        self._macaron: 'tuple | None' = None   # (cx, by, alpha) draw position, or None
+        self._macaron_grab: bool = False        # True while the user is dragging it
+        self._macaron_grab_off = QPoint(0, 0)
+        self._macaron_drag_pt  = QPoint(0, 0)
+        self._feed_requested: bool = False      # set by the hub bridge, drained by main
         # (cx, bottom_y) of the taskbar icon Sao is working inside → teal bar.
         self._work_icon_bar: 'tuple[int, int] | None' = None
         # x of the flower Sao is currently tending (forced in front of her so
@@ -734,6 +742,29 @@ class CatOverlay(QWidget):
         self._coins       = []   # coins removed
         self._effects     = effects
 
+    # ── Macaron treat ───────────────────────────────────────────────────
+    def request_feed(self) -> None:
+        """Called by the hub bridge when the user hits 'feed'."""
+        self._feed_requested = True
+
+    def consume_feed_request(self) -> bool:
+        """main drains this each tick; True once per hub 'feed' press."""
+        if self._feed_requested:
+            self._feed_requested = False
+            return True
+        return False
+
+    def set_macaron(self, cx, by, alpha: float = 1.0) -> None:
+        """Place (or clear with cx=None) the macaron treat at centre-x `cx`,
+        bottom-y `by`.  `alpha` lets main fade it if needed."""
+        self._macaron = None if cx is None else (float(cx), float(by), float(alpha))
+
+    def macaron_grabbed(self) -> bool:
+        return self._macaron_grab
+
+    def macaron_drag_pos(self) -> QPoint:
+        return self._macaron_drag_pt
+
     def set_friend_bugs(self, friend_bugs: list) -> None:
         """Store reference to the FriendBug list (ABug3 cursor pets)."""
         self._friend_bugs = friend_bugs
@@ -1077,6 +1108,17 @@ class CatOverlay(QWidget):
     def mousePressEvent(self, event) -> None:
         if event.button() != Qt.MouseButton.LeftButton:
             return
+        # Grab the macaron treat to drag it around (checked first so it can be
+        # picked up even if it's sitting near Sao).
+        if self._macaron is not None:
+            mcx, mby, _ma = self._macaron
+            if (abs(event.pos().x() - mcx) < MACARON_HIT
+                    and abs(event.pos().y() - (mby - 6)) < MACARON_HIT):
+                self._macaron_grab     = True
+                self._macaron_grab_off = event.pos() - QPoint(int(mcx), int(mby))
+                self._macaron_drag_pt  = QPoint(int(mcx), int(mby))
+                self.setCursor(Qt.CursorShape.ClosedHandCursor)
+                return
         # Grab Sao to drag her (only when she's actually visible).
         if (self._cat is not None and not self._sao_in_hut
                 and not self._cat_working and not self._cat_hidden):
@@ -1109,6 +1151,10 @@ class CatOverlay(QWidget):
             self.update()
 
     def mouseMoveEvent(self, event) -> None:
+        if self._macaron_grab:
+            self._macaron_drag_pt = event.pos() - self._macaron_grab_off
+            self.update()
+            return
         if self._hut_dragging:
             self._hut_x = max(20, min(self.width() - 20, event.pos().x()))
             self.update()
@@ -1135,6 +1181,10 @@ class CatOverlay(QWidget):
 
     def mouseReleaseEvent(self, event) -> None:
         if event.button() != Qt.MouseButton.LeftButton:
+            return
+        if self._macaron_grab:
+            self._macaron_grab = False
+            self.setCursor(Qt.CursorShape.ArrowCursor)
             return
         if self._hut_dragging:
             self._hut_dragging   = False
@@ -1476,6 +1526,15 @@ class CatOverlay(QWidget):
                 self._draw_task_flower_tooltip(painter,
                                                tfs[self._hovered_task_flower_idx])
 
+        # Macaron treat — drawn near world level so Sao can come eat it.
+        if self._macaron is not None:
+            if self._macaron_grab:
+                self._draw_macaron_treat(painter, self._macaron_drag_pt.x(),
+                                         self._macaron_drag_pt.y(), 1.0)
+            else:
+                _mcx, _mby, _ma = self._macaron
+                self._draw_macaron_treat(painter, _mcx, _mby, _ma)
+
         # Sao speech bubble — a brief reaction above her head, topmost.
         if _cat_visible and self._sao_msg:
             from PyQt6.QtCore import QDateTime as _QDT
@@ -1490,6 +1549,31 @@ class CatOverlay(QWidget):
             self._draw_nap_zs(painter, int(cat.x), int(cat.y), cat.width)
 
         painter.end()
+
+    def _draw_macaron_treat(self, painter: QPainter, cx, by, alpha: float = 1.0) -> None:
+        """A small pink macaron (two shells + cream filling), centred at x=cx
+        with its bottom at y=by.  Pixel-art to match the garden sprites."""
+        painter.setPen(Qt.PenStyle.NoPen)
+        a   = max(0, min(255, int(255 * alpha)))
+        MP  = QColor(242, 180, 212, a)   # shell body
+        MS  = QColor(206, 138, 172, a)   # shell shadow edge
+        MH  = QColor(255, 219, 236, a)   # shell highlight
+        FIL = QColor(255, 228, 190, a)   # cream filling
+        S   = 2
+        x   = int(cx); base = int(by)
+
+        def blk(bx, bup, w, h, c):
+            painter.setBrush(c)
+            painter.drawRect(x + bx * S, base - (bup + h) * S, w * S, h * S)
+
+        # bottom shell
+        blk(-3, 0, 6, 2, MP); blk(-3, 0, 1, 2, MS); blk(2, 0, 1, 2, MS)
+        blk(-2, 2, 4, 1, MH)
+        # cream filling
+        blk(-3, 3, 6, 1, FIL)
+        # top shell
+        blk(-3, 4, 6, 2, MP); blk(-3, 4, 1, 2, MS); blk(2, 4, 1, 2, MS)
+        blk(-2, 6, 4, 1, MH)
 
     def _draw_nap_zs(self, painter: QPainter, cx: int, cy: int, cat_w: int) -> None:
         """Three little 'z's rising and fading above Sao's head while she naps."""
@@ -1696,7 +1780,13 @@ class CatOverlay(QWidget):
         # the mouse.  Clicking a flower dismisses it for a few seconds (it
         # regrows after), which clears it out of the way of the button behind.
         over_flower = self._hovered_task_flower_idx is not None
-        interactive = over_cat or over_flower or self._cursor_over_interior
+        over_macaron = False
+        if self._macaron is not None:
+            mcx, mby, _ma = self._macaron
+            over_macaron = (abs(cursor.x() - mcx) < MACARON_HIT
+                            and abs(cursor.y() - (mby - 6)) < MACARON_HIT)
+        interactive = (over_cat or over_flower or over_macaron
+                       or self._cursor_over_interior or self._macaron_grab)
         self._set_click_through(not interactive)
         self.setCursor(Qt.CursorShape.ClosedHandCursor   if self.is_dragging else
                        Qt.CursorShape.OpenHandCursor     if over_cat else

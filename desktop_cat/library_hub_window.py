@@ -544,6 +544,18 @@ class SaoBridge(QObject):
         except Exception as e:
             print(f'[armPinMode] {e}')
 
+    @pyqtSlot()
+    def feedMacaron(self) -> None:
+        """Drop a macaron treat onto the desktop for Sao to chase + eat.
+        (The overlay owns the treat; main spawns + animates it.)"""
+        try:
+            from desktop_cat import pin_registry
+            ov = pin_registry.get_overlay()
+            if ov is not None and hasattr(ov, 'request_feed'):
+                ov.request_feed()
+        except Exception as e:
+            print(f'[feedMacaron] {e}')
+
     @pyqtSlot(result=str)
     def getPinnedWindows(self) -> str:
         """[{hwnd, title}, ...] of currently-pinned windows for Settings."""

@@ -76,6 +76,8 @@ DESCEND_CHANCE = 0.45
 _SAO_DONE_LINES = ('Nice work! 🌸', 'One down! ✨', 'Proud of you 💛',
                    'Yay, done! 🌷', 'Keep it up! 🍃', 'So tidy! ✨',
                    'Lovely! 🌼', 'Look at you go! ⭐')
+_SAO_EAT_LINES  = ('nom nom ♡', 'mmm! 🍪', 'tasty~', 'yum! ♡', 'so good!')
+MACARON_NOTICE_PX = 360   # she only chases/eats a treat within this horizontal range
 
 # Taskbar drop — Sao occasionally hops down into the taskbar to walk around
 TASKBAR_DROP_CHANCE  = 0.38   # probability per wander-change when on floor
@@ -1427,6 +1429,8 @@ def main():
     nap_ticks          = 0       # consecutive ticks of zero mouse movement
     napping            = False   # True while she's dozing (stands still + Z's)
     nap_cursor_ref     = (0, 0)  # cursor pos last tick, for movement detection
+    macaron            = None    # {'x','y','vy','state'} treat on the desktop, or None
+    macaron_eat_ticks  = 0       # ticks held in the 'eating' interact pose
     # Pester tracking — how many rapid passes the cursor has made over Sao.
     pester_count       = 0    # passes counted in the current window
     pester_decay       = 0    # ticks left before the count resets (rolling window)
@@ -1553,7 +1557,7 @@ def main():
         nonlocal attack_ticks, attack_dir, attack_origin_x, attack_cooldown, cursor_slide_vx
         nonlocal punch_window_ticks, punch_count_3min, hover_stop_ticks
         nonlocal pester_count, pester_decay, pester_was_over, was_dragging
-        nonlocal nap_ticks, napping, nap_cursor_ref
+        nonlocal nap_ticks, napping, nap_cursor_ref, macaron, macaron_eat_ticks
         nonlocal jump_ticks, jump_target_hwnd, jump_attempts, jump_cooldown
         nonlocal wind_up_ticks, pending_jump_target
         nonlocal walk_around_dir
@@ -2241,6 +2245,30 @@ def main():
         effects[:] = [e for e in effects if e.alive]
 
         # ── idle pause (sit still, skip behaviour this tick) ─────────────
+        # ── Macaron treat: spawn + physics (always runs, before idle/nap) ──
+        if overlay.consume_feed_request() and macaron is None:
+            macaron = {'x': float(screen_w * 0.5), 'y': float(screen_floor),
+                       'vy': 0.0, 'state': 'falling'}
+        if macaron is not None:
+            if overlay.macaron_grabbed():
+                _dp = overlay.macaron_drag_pos()
+                macaron['x'] = float(_dp.x())
+                macaron['y'] = float(_dp.y())
+                macaron['vy'] = 0.0
+                macaron['state'] = 'held'
+            else:
+                if macaron['state'] == 'held':
+                    macaron['state'] = 'falling'
+                if macaron['state'] == 'falling':
+                    macaron['vy'] = min(22.0, macaron['vy'] + 1.2)
+                    macaron['y'] += macaron['vy']
+                    if macaron['y'] >= screen_floor:
+                        macaron['y']  = float(screen_floor)
+                        macaron['vy'] = 0.0
+                        macaron['state'] = 'resting'
+            macaron['x'] = max(8.0, min(float(screen_w - 8), macaron['x']))
+            overlay.set_macaron(macaron['x'], macaron['y'], 1.0)
+
         if idle_pause > 0:
             idle_pause -= 1
             overlay.update_state(cat, platforms, wind_up_frac=0.0)
@@ -2257,7 +2285,7 @@ def main():
         nap_cursor_ref = (_np.x(), _np.y())
         if napping:
             if (_np_moved or overlay.is_dragging or not cat.grounded
-                    or taskbar_state != 'normal'):
+                    or taskbar_state != 'normal' or macaron is not None):
                 napping   = False
                 nap_ticks = 0
             else:
@@ -2269,8 +2297,49 @@ def main():
             nap_ticks = 0 if _np_moved else nap_ticks + 1
             if (nap_ticks >= NAP_AFTER_TICKS and cat.grounded
                     and taskbar_state == 'normal' and not is_jumping
-                    and not overlay.is_dragging):
+                    and not overlay.is_dragging and macaron is None):
                 napping = True
+
+        # ── Macaron feeding: chase / jump-at / eat the treat, but only when
+        #    it's within her view range (she ignores one across the screen). ──
+        if (macaron is not None and cat.grounded and taskbar_state == 'normal'
+                and not is_jumping and attack_phase == ''):
+            _sao_cx = cat.x + cat.width / 2
+            _mdx    = macaron['x'] - _sao_cx
+            if abs(_mdx) < MACARON_NOTICE_PX:
+                _feet  = cat.y + cat.height
+                _level = abs(macaron['y'] - _feet) < 26
+                if macaron['state'] == 'resting' and abs(_mdx) < 20 and _level:
+                    # Reached it on the same surface — eat (hold interact pose).
+                    cat = stop_walking(cat)
+                    macaron_eat_ticks += 1
+                    if macaron_eat_ticks >= 36:
+                        macaron = None
+                        macaron_eat_ticks = 0
+                        overlay.set_macaron(None, 0)
+                        overlay.say(random.choice(_SAO_EAT_LINES))
+                    overlay.update_state(cat, platforms, occluded=is_occluded,
+                                         anim_override='interact_close')
+                    tick_count += 1
+                    return
+                else:
+                    macaron_eat_ticks = 0
+                    _run  = abs(_mdx) > 150
+                    cat   = walk(cat, 1 if _mdx > 0 else -1, run=_run)
+                    _anim = 'run' if _run else None
+                    # Jump up at it when it's dangled above her and she's under it
+                    # (just a hopeful leap — she can't grab it mid-air).
+                    if (macaron['state'] in ('held', 'falling')
+                            and abs(_mdx) < 60 and (_feet - macaron['y']) > 28
+                            and jump_cooldown == 0):
+                        cat = jump(cat, power=JUMP_MIN_POWER * 1.15)
+                        is_jumping   = True
+                        jump_cooldown = 24
+                        _anim = None
+                    overlay.update_state(cat, platforms, occluded=is_occluded,
+                                         anim_override=_anim)
+                    tick_count += 1
+                    return
 
         # ── jump give-up cooldown ─────────────────────────────────────────
         if jump_cooldown > 0:
