@@ -265,6 +265,15 @@ class Animator:
         elif vx < -0.5:
             self.facing_right = False
 
+        # ── Nap: hold a single frame (interact_mid / row index 1, frame 2) ──
+        if anim_name == 'nap':
+            self._name = 'interact_mid'
+            frames = self._frames_right.get('interact_mid', [])
+            self._frame = min(2, len(frames) - 1) if frames else 0
+            self._cycle_completed = False
+            self._was_grounded = grounded
+            return
+
         just_landed = grounded and not self._was_grounded
 
         # ── Landing hold: keep jump sheet frame 4 briefly after touching down ──

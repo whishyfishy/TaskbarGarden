@@ -278,6 +278,9 @@ class CatOverlay(QWidget):
         # Brief speech bubble above Sao's head (reactions like "Nice work!").
         self._sao_msg: str = ''
         self._sao_msg_until_ms: int = 0
+        # Napping — sleepy Z's drift up off her head.
+        self._napping: bool = False
+        self._nap_phase: float = 0.0
         # (cx, bottom_y) of the taskbar icon Sao is working inside → teal bar.
         self._work_icon_bar: 'tuple[int, int] | None' = None
         # x of the flower Sao is currently tending (forced in front of her so
@@ -966,6 +969,9 @@ class CatOverlay(QWidget):
         self._platforms = platforms
         self._occluded  = occluded
         self._is_interacting = anim_override is not None and anim_override.startswith('interact')
+        self._napping = (anim_override == 'nap')
+        if self._napping:
+            self._nap_phase += 0.018
 
         # Intro drop aura tracking
         if self._intro_drop_active and cat is not None:
@@ -1479,7 +1485,30 @@ class CatOverlay(QWidget):
             else:
                 self._sao_msg = ''
 
+        # Napping Z's — drift up off her head while she dozes.
+        if _cat_visible and self._napping and not self._sao_msg:
+            self._draw_nap_zs(painter, int(cat.x), int(cat.y), cat.width)
+
         painter.end()
+
+    def _draw_nap_zs(self, painter: QPainter, cx: int, cy: int, cat_w: int) -> None:
+        """Three little 'z's rising and fading above Sao's head while she naps."""
+        base_x = cx + cat_w // 2 + 6
+        base_y = cy + 2
+        f = QFont('Segoe UI', 0)
+        for i in range(3):
+            t = (self._nap_phase + i / 3.0) % 1.0   # 0→1 life of each z
+            alpha = int(210 * (1.0 - t))             # fade out as it rises
+            if alpha <= 0:
+                continue
+            size = 9 + int(i * 2.5)                   # later z's slightly bigger
+            f.setPixelSize(size)
+            f.setBold(True)
+            painter.setFont(f)
+            painter.setPen(QColor(150, 170, 230, alpha))
+            x = base_x + int(i * 4 + math.sin(t * 6.28) * 2)
+            y = base_y - int(t * 26) - i * 6
+            painter.drawText(x, y, 'z')
 
     # ------------------------------------------------------------------
     # Internals

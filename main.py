@@ -56,6 +56,7 @@ SCAN_EVERY = 3              # scan windows every 3rd tick (~20 Hz)
 # Wandering
 WANDER_CHANGE_TICKS = 420   # ~7s between direction changes (calmer pace)
 IDLE_PAUSE_TICKS    = 220   # ~3.7s forced pause after landing (heavier idle)
+NAP_AFTER_TICKS     = 900   # ~15s of zero mouse movement → Sao dozes off
 
 # Jump behaviour
 WIND_UP_TICKS       = 20    # ~0.33s crouch before launching
@@ -1423,6 +1424,9 @@ def main():
     punch_window_ticks = PUNCH_WINDOW_TICKS  # countdown of the current 3-min budget window
     punch_count_3min   = 0  # punches thrown in the current window (cap = PUNCH_MAX_PER_WINDOW)
     was_dragging       = False  # True if Sao was being mouse-dragged last tick
+    nap_ticks          = 0       # consecutive ticks of zero mouse movement
+    napping            = False   # True while she's dozing (stands still + Z's)
+    nap_cursor_ref     = (0, 0)  # cursor pos last tick, for movement detection
     # Pester tracking — how many rapid passes the cursor has made over Sao.
     pester_count       = 0    # passes counted in the current window
     pester_decay       = 0    # ticks left before the count resets (rolling window)
@@ -1549,6 +1553,7 @@ def main():
         nonlocal attack_ticks, attack_dir, attack_origin_x, attack_cooldown, cursor_slide_vx
         nonlocal punch_window_ticks, punch_count_3min, hover_stop_ticks
         nonlocal pester_count, pester_decay, pester_was_over, was_dragging
+        nonlocal nap_ticks, napping, nap_cursor_ref
         nonlocal jump_ticks, jump_target_hwnd, jump_attempts, jump_cooldown
         nonlocal wind_up_ticks, pending_jump_target
         nonlocal walk_around_dir
@@ -2241,6 +2246,31 @@ def main():
             overlay.update_state(cat, platforms, wind_up_frac=0.0)
             tick_count += 1
             return
+
+        # ── Napping ───────────────────────────────────────────────────────
+        # After a long stretch of zero mouse movement she dozes off: stands
+        # still on a single interact frame with little Z's floating up.  Any
+        # cursor movement (or a drag / leaving the taskbar) wakes her.
+        _np = QCursor.pos()
+        _np_moved = (abs(_np.x() - nap_cursor_ref[0])
+                     + abs(_np.y() - nap_cursor_ref[1])) > 3
+        nap_cursor_ref = (_np.x(), _np.y())
+        if napping:
+            if (_np_moved or overlay.is_dragging or not cat.grounded
+                    or taskbar_state != 'normal'):
+                napping   = False
+                nap_ticks = 0
+            else:
+                cat = stop_walking(cat)
+                overlay.update_state(cat, platforms, anim_override='nap')
+                tick_count += 1
+                return
+        else:
+            nap_ticks = 0 if _np_moved else nap_ticks + 1
+            if (nap_ticks >= NAP_AFTER_TICKS and cat.grounded
+                    and taskbar_state == 'normal' and not is_jumping
+                    and not overlay.is_dragging):
+                napping = True
 
         # ── jump give-up cooldown ─────────────────────────────────────────
         if jump_cooldown > 0:
