@@ -1137,6 +1137,10 @@ function IOSSettingsScreen({ bridge, onSyncCanvas, syncMsg, light, setLight }) {
                           borderRadius: '4px 4px 9px 9px' }} />
           </div>
         </Row>
+        <Row k="Block mode 🧱" sub="Click to place/erase blocks, right-click removes, R switches dirt/grass, Esc exits">
+          <Switch on={!!(world && world.block_mode)}
+            onClick={() => patchWorld({ block_mode: !(world && world.block_mode) })} />
+        </Row>
       </Grp>
 
       <Grp label="Window pinning">

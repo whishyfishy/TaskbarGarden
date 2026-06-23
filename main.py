@@ -48,6 +48,7 @@ from desktop_cat.global_hotkeys  import GlobalHotkeys
 from desktop_cat.onboarding_window import OnboardingWindow
 from desktop_cat import user_profile
 from desktop_cat import sounds
+from desktop_cat import blocks_data
 from desktop_cat import taskbar_icons
 
 TICK_MS = 1000 // 60        # ~16ms = 60 FPS
@@ -256,6 +257,9 @@ def pick_jump_target(cat: CatState, platforms: list[Platform],
             continue
 
         score = -dy + (JUMP_HORIZONTAL_RANGE - dx) * 0.3
+        # Bias her toward jumping onto placed blocks so they're fun to build on.
+        if blocks_data.is_block_hwnd(p.hwnd):
+            score += 120
         candidates.append((score, p))
 
     if not candidates:
@@ -1151,6 +1155,40 @@ def main():
     overlay.set_shrubs(shrubs)
     overlay.set_rocks(rocks)
 
+    # ── Placeable blocks (2D-Minecraft) ───────────────────────────────────
+    blocks = blocks_data.load_blocks()   # {(c, r): style}, mutated by the overlay
+    def _save_blocks() -> None:
+        blocks_data.save_blocks(blocks)
+    overlay.set_blocks(blocks)
+    overlay._on_blocks_changed = _save_blocks
+    block_r_was_down = [False]            # edge-detect the R key while placing
+
+    def _build_block_platforms() -> list:
+        """Square blocks → collision platforms.  Horizontally-adjacent blocks in
+        the same row are merged into one wide platform so Sao walks across a row
+        smoothly instead of catching on every seam."""
+        if not blocks:
+            return []
+        from collections import defaultdict
+        by_row: dict = defaultdict(list)
+        for (c, r) in blocks:
+            by_row[r].append(c)
+        out = []
+        for r, cols in by_row.items():
+            cols.sort()
+            run_start = prev = cols[0]
+            for c in cols[1:] + [None]:
+                if c == prev + 1:
+                    prev = c
+                    continue
+                x, y, _w, h = blocks_data.cell_rect(run_start, r, screen_floor)
+                w = (prev - run_start + 1) * blocks_data.BLOCK_SIZE
+                out.append(Platform(hwnd=blocks_data.block_hwnd(run_start, r),
+                                    x=x, y=y, w=w, h=h, solid=True))
+                if c is not None:
+                    run_start = prev = c
+        return out
+
     # Pomodoro window — created once, shown/hidden on demand
     pomodoro_win = PomodoroWindow()
 
@@ -1210,6 +1248,8 @@ def main():
             overlay.set_grass_bed(_ws.get('grass_bed', 0))
         if hasattr(overlay, 'set_rock_density'):
             overlay.set_rock_density(_ws.get('rock_density', 0))
+        if hasattr(overlay, 'set_block_mode'):
+            overlay.set_block_mode(bool(_ws.get('block_mode', False)))
     except (OSError, ValueError, TypeError):
         overlay.pomodoro.set_display_mode(0)
 
@@ -1250,6 +1290,8 @@ def main():
             overlay.set_grass_bed(settings.get('grass_bed', 0))
         if hasattr(overlay, 'set_rock_density'):
             overlay.set_rock_density(settings.get('rock_density', 0))
+        if hasattr(overlay, 'set_block_mode'):
+            overlay.set_block_mode(bool(settings.get('block_mode', False)))
     _on_world_settings_changed = _apply_world_settings   # legacy alias
 
     # Live-poll world_settings.json (written by the hub Settings panel via
@@ -1721,6 +1763,40 @@ def main():
             _vis_platforms = []
         else:
             _vis_platforms = platforms
+        # Placed blocks are always solid (she can stand/jump on them even when
+        # they're faded out), so add them as platforms unless fully covered.
+        if blocks and not _has_fullscreen:
+            _vis_platforms = _vis_platforms + _build_block_platforms()
+
+        # While in block mode, R cycles the style being placed (polled globally;
+        # only active during placement so it doesn't shadow normal typing).
+        # Escape exits block mode — needed because the overlay captures all
+        # clicks while placing, so the hub toggle can't be clicked to leave.
+        if getattr(overlay, '_block_mode', False):
+            try:
+                _r_down   = bool(ctypes.windll.user32.GetAsyncKeyState(0x52) & 0x8000)
+                _esc_down = bool(ctypes.windll.user32.GetAsyncKeyState(0x1B) & 0x8000)
+            except Exception:
+                _r_down = _esc_down = False
+            if _r_down and not block_r_was_down[0]:
+                overlay.cycle_block_style()
+            block_r_was_down[0] = _r_down
+            if _esc_down:
+                overlay.set_block_mode(False)
+                try:    # persist so the hub toggle reflects the exit
+                    with open(_ws_path, 'r', encoding='utf-8') as _bf:
+                        _bd = _json.load(_bf)
+                    if not isinstance(_bd, dict):
+                        _bd = {}
+                except Exception:
+                    _bd = {}
+                _bd['block_mode'] = False
+                try:
+                    with open(_ws_path, 'w', encoding='utf-8') as _bf:
+                        _json.dump(_bd, _bf, indent=2)
+                    _ws_poll_state['mtime'] = os.path.getmtime(_ws_path)
+                except Exception:
+                    pass
 
         # ── snap cat to window top while grounded ────────────────────────
         if cat.grounded and cat.on_hwnd is not None:

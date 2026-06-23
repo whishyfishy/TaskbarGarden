@@ -8,6 +8,7 @@ from PyQt6.QtGui import QPainter, QPen, QColor, QFont, QCursor, QPixmap, QPainte
 
 from desktop_cat.physics import CatState, RUN_SPEED
 from desktop_cat.collision import Platform
+from desktop_cat import blocks_data
 from desktop_cat.animator import Animator, CAT_W, CAT_H, FRAME_W
 from desktop_cat.event_bus import EventBus
 from desktop_cat.pomodoro_overlay import PomodoroOverlay
@@ -286,6 +287,13 @@ class CatOverlay(QWidget):
         self._macaron_grab_off = QPoint(0, 0)
         self._macaron_drag_pt  = QPoint(0, 0)
         self._feed_requested: bool = False      # set by the hub bridge, drained by main
+        # Placeable blocks (2D-Minecraft).  main owns the dict {(c,r): style};
+        # the overlay draws them, shows the grid, and handles placement clicks.
+        self._blocks: dict = {}                 # shared ref, set by main
+        self._block_mode: bool = False
+        self._block_style: int = 0              # 0=dirt+grass-top, 1=grassy
+        self._on_blocks_changed = None          # callback → main persists
+        self._block_pm_cache: dict = {}         # style → pre-rendered QPixmap
         # (cx, bottom_y) of the taskbar icon Sao is working inside → teal bar.
         self._work_icon_bar: 'tuple[int, int] | None' = None
         # x of the flower Sao is currently tending (forced in front of her so
@@ -773,6 +781,22 @@ class CatOverlay(QWidget):
     def macaron_drag_pos(self) -> QPoint:
         return self._macaron_drag_pt
 
+    # ── Blocks ──────────────────────────────────────────────────────────
+    def set_blocks(self, blocks: dict) -> None:
+        """Share main's {(c,r): style} dict so the overlay can draw + edit it."""
+        self._blocks = blocks
+
+    def set_block_mode(self, on: bool) -> None:
+        self._block_mode = bool(on)
+        # Capture all clicks while placing; restore normal click-through on exit
+        # (the next hit-test refines it based on what's under the cursor).
+        self._set_click_through(not self._block_mode)
+        self.update()
+
+    def cycle_block_style(self) -> None:
+        self._block_style ^= 1
+        self.update()
+
     def set_friend_bugs(self, friend_bugs: list) -> None:
         """Store reference to the FriendBug list (ABug3 cursor pets)."""
         self._friend_bugs = friend_bugs
@@ -1114,6 +1138,25 @@ class CatOverlay(QWidget):
     # ------------------------------------------------------------------
 
     def mousePressEvent(self, event) -> None:
+        # Block mode: left-click places (or replaces) a block at the hovered
+        # cell; right-click removes it.  Toggling avoids needing a separate
+        # erase tool.
+        if self._block_mode and self._garden_floor_y > 0:
+            cell = blocks_data.cell_at(event.pos().x(), event.pos().y(),
+                                       self._garden_floor_y)
+            if event.button() == Qt.MouseButton.RightButton:
+                self._blocks.pop(cell, None)
+            elif event.button() == Qt.MouseButton.LeftButton:
+                if self._blocks.get(cell) == self._block_style:
+                    self._blocks.pop(cell, None)        # same style → erase (toggle)
+                elif len(self._blocks) < blocks_data.MAX_BLOCKS or cell in self._blocks:
+                    self._blocks[cell] = self._block_style
+            else:
+                return
+            if self._on_blocks_changed:
+                self._on_blocks_changed()
+            self.update()
+            return
         if event.button() != Qt.MouseButton.LeftButton:
             return
         # Grab the macaron treat to drag it around (checked first so it can be
@@ -1433,6 +1476,10 @@ class CatOverlay(QWidget):
             self._draw_extra_rocks(painter)
         self._draw_task_flowers(painter, front=False)
 
+        # Placeable blocks — drawn behind Sao so she stands on top of them.
+        if self._blocks and self._garden_floor_y > 0:
+            self._draw_blocks(painter, cat)
+
         # Sao on the floor → drawn in front of background layer
         if _cat_visible and not _on_window:
             _pos = self._drag_pos if self.is_dragging else QPoint(int(cat.x), int(cat.y))
@@ -1536,6 +1583,10 @@ class CatOverlay(QWidget):
                 self._draw_task_flower_tooltip(painter,
                                                tfs[self._hovered_task_flower_idx])
 
+        # Block-placement grid + ghost (only while in block mode), on top.
+        if self._block_mode and self._garden_floor_y > 0:
+            self._draw_block_grid(painter)
+
         # Macaron treat — drawn near world level so Sao can come eat it.
         if self._macaron is not None:
             if self._macaron_grab:
@@ -1559,6 +1610,106 @@ class CatOverlay(QWidget):
             self._draw_nap_zs(painter, int(cat.x), int(cat.y), cat.width)
 
         painter.end()
+
+    def _draw_blocks(self, painter: QPainter, cat) -> None:
+        """Blit every placed block (cached pixmap), fading each by how close Sao
+        is (so they reveal as she nears).  In block mode they're shown at full
+        opacity so you can see what you're editing."""
+        floor = self._garden_floor_y
+        cat_cx = cat.x + cat.width / 2 if cat is not None else 0.0
+        cat_cy = cat.y + cat.height / 2 if cat is not None else 0.0
+        near = blocks_data.BLOCK_FADE_NEAR
+        far  = blocks_data.BLOCK_FADE_FAR
+        S = blocks_data.BLOCK_SIZE
+        for (c, r), style in self._blocks.items():
+            x, y, _w, _h = blocks_data.cell_rect(c, r, floor)
+            if self._block_mode or cat is None:
+                alpha = 1.0
+            else:
+                bx, by = x + S / 2, y + S / 2
+                d = math.hypot(bx - cat_cx, by - cat_cy)
+                if d >= far:
+                    continue
+                alpha = 1.0 if d <= near else (far - d) / float(far - near)
+            painter.setOpacity(alpha)
+            painter.drawPixmap(x, y, self._block_pixmap(style))
+        painter.setOpacity(1.0)
+
+    def _block_pixmap(self, style: int) -> 'QPixmap':
+        """Cached pixely Minecraft-ish block: textured texels, jagged grass/dirt
+        boundary, speckles, ever-so-slightly rounded corners.  One per style."""
+        pm = self._block_pm_cache.get(style)
+        if pm is not None:
+            return pm
+        S = blocks_data.BLOCK_SIZE
+        T = 2
+        n = S // T
+        if style == blocks_data.STYLE_DIRT:
+            top = [(96, 168, 72), (80, 148, 58), (108, 182, 84)]
+            bod = [(126, 88, 54), (110, 76, 46), (140, 100, 64), (98, 68, 42)]
+            grass_rows = 3
+        else:
+            top = [(96, 168, 72), (80, 148, 58), (108, 182, 84), (70, 132, 52)]
+            bod = top
+            grass_rows = n
+        pm = QPixmap(S, S)
+        pm.fill(Qt.GlobalColor.transparent)
+        p = QPainter(pm)
+        p.setPen(Qt.PenStyle.NoPen)
+        seed = 1234567 if style == blocks_data.STYLE_DIRT else 7654321
+        for tx in range(n):
+            col_h = grass_rows + (((seed ^ (tx * 83492791)) >> 3) % 3 - 1)
+            for ty in range(n):
+                if (tx in (0, n - 1)) and (ty in (0, n - 1)):
+                    continue  # rounded corners
+                pal = top if ty < col_h else bod
+                hsh = (tx * 374761393) ^ (ty * 668265263) ^ seed
+                col = pal[hsh % len(pal)]
+                if ty == n - 1 or tx == n - 1:
+                    col = (int(col[0] * 0.82), int(col[1] * 0.82), int(col[2] * 0.82))
+                p.setBrush(QColor(*col))
+                p.drawRect(tx * T, ty * T, T, T)
+        p.end()
+        self._block_pm_cache[style] = pm
+        return pm
+
+    def _draw_block_grid(self, painter: QPainter) -> None:
+        """The torch-lit placement grid around the cursor + a ghost of the
+        block about to be placed, plus a tiny style/▢ R hint."""
+        cur   = self.mapFromGlobal(QCursor.pos())
+        floor = self._garden_floor_y
+        S = blocks_data.BLOCK_SIZE
+        R = blocks_data.TORCH_RADIUS
+        ccur, rcur = blocks_data.cell_at(cur.x(), cur.y(), floor)
+        span = R // S + 1
+        painter.setBrush(Qt.BrushStyle.NoBrush)
+        for dc in range(-span, span + 1):
+            for dr in range(-span, span + 1):
+                x, y, w, h = blocks_data.cell_rect(ccur + dc, rcur + dr, floor)
+                gx, gy = x + w / 2, y + h / 2
+                d = math.hypot(gx - cur.x(), gy - cur.y())
+                if d > R:
+                    continue
+                av = int(64 * (1.0 - d / R))
+                if av <= 1:
+                    continue
+                painter.setPen(QColor(255, 255, 255, av))
+                painter.drawRect(x, y, w, h)
+        # Ghost of the block to be placed.
+        gx, gy, gw, gh = blocks_data.cell_rect(ccur, rcur, floor)
+        painter.setOpacity(0.55)
+        painter.drawPixmap(gx, gy, self._block_pixmap(self._block_style))
+        painter.setOpacity(1.0)
+        painter.setPen(QColor(255, 255, 255, 200))
+        painter.setBrush(Qt.BrushStyle.NoBrush)
+        painter.drawRect(gx, gy, gw, gh)
+        # Style hint above the cursor.
+        f = QFont('Segoe UI', 8)
+        f.setBold(True)
+        painter.setFont(f)
+        painter.setPen(QColor(255, 255, 255, 215))
+        _name = 'dirt' if self._block_style == blocks_data.STYLE_DIRT else 'grass'
+        painter.drawText(gx, gy - 6, f'{_name}  ·  R switch  ·  Esc exit')
 
     def _draw_macaron_treat(self, painter: QPainter, cx, by, alpha: float = 1.0) -> None:
         """A small pink macaron (two shells + cream filling), centred at x=cx
@@ -1731,6 +1882,12 @@ class CatOverlay(QWidget):
 
     def _update_hit_test(self) -> None:
         if self.is_dragging:
+            return
+        # In block mode the whole overlay captures clicks (so we can place
+        # blocks anywhere) and the grid follows the cursor.
+        if self._block_mode:
+            self._set_click_through(False)
+            self.update()
             return
         cursor = self.mapFromGlobal(QCursor.pos())
 
