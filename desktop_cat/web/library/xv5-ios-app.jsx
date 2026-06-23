@@ -1103,11 +1103,17 @@ function IOSSettingsScreen({ bridge, onSyncCanvas, syncMsg, light, setLight }) {
           <Switch on={!(world && world.rocks_hidden)}
             onClick={() => patchWorld({ rocks_hidden: !(world && world.rocks_hidden) })} />
         </Row>
-        <Row k="Grass" sub="How lush the lawn is — sways on a breeze & when you brush past">
+        <Row k="Grass" sub="How many grass tufts — sways on a breeze & when you brush past">
           <input type="range" className="ios-range" min="0" max="100" step="5"
             style={{ width: 128 }}
             value={world && world.grass_density != null ? world.grass_density : 35}
             onChange={e => patchWorld({ grass_density: +e.target.value })} />
+        </Row>
+        <Row k="Grass bed" sub="Short backing grass that fills the gaps into a full lawn">
+          <input type="range" className="ios-range" min="0" max="100" step="5"
+            style={{ width: 128 }}
+            value={world && world.grass_bed != null ? world.grass_bed : 0}
+            onChange={e => patchWorld({ grass_bed: +e.target.value })} />
         </Row>
         <Row k="Extra rocks" sub="Scatter a few more pebbles across the ground">
           <input type="range" className="ios-range" min="0" max="100" step="5"
@@ -1119,14 +1125,17 @@ function IOSSettingsScreen({ bridge, onSyncCanvas, syncMsg, light, setLight }) {
           <Switch on={!!(world && world.greenbeans)}
             onClick={() => patchWorld({ greenbeans: !(world && world.greenbeans) })} />
         </Row>
-        <Row k="Feed Sao 🍪" sub="Drops a macaron on the desktop — drag it near her and she'll chase & eat it">
-          <button
-            onClick={() => { try { bridge && bridge.feedMacaron && bridge.feedMacaron(); } catch (e) {} }}
-            style={{ background: 'linear-gradient(135deg,#f4b9d6,#e58fb6)', color: '#5a2a40',
-                     border: 'none', borderRadius: 10, padding: '6px 14px', fontWeight: 700,
-                     fontSize: 13, cursor: 'pointer' }}>
-            Drop treat
-          </button>
+        <Row k="Feed Sao" sub="Press & drag this macaron onto the desktop — she'll chase it & eat it">
+          <div
+            title="Drag me onto the desktop!"
+            onMouseDown={() => { try { bridge && bridge.feedMacaron && bridge.feedMacaron(); } catch (e) {} }}
+            style={{ width: 34, cursor: 'grab', userSelect: 'none' }}>
+            <div style={{ height: 9, background: 'linear-gradient(#f4b9d6,#e58fb6)',
+                          borderRadius: '9px 9px 4px 4px' }} />
+            <div style={{ height: 5, background: '#ffe4be', margin: '0 1px' }} />
+            <div style={{ height: 9, background: 'linear-gradient(#e58fb6,#d97fa9)',
+                          borderRadius: '4px 4px 9px 9px' }} />
+          </div>
         </Row>
       </Grp>
 

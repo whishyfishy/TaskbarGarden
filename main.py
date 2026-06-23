@@ -56,7 +56,8 @@ SCAN_EVERY = 3              # scan windows every 3rd tick (~20 Hz)
 # Wandering
 WANDER_CHANGE_TICKS = 420   # ~7s between direction changes (calmer pace)
 IDLE_PAUSE_TICKS    = 220   # ~3.7s forced pause after landing (heavier idle)
-NAP_AFTER_TICKS     = 900   # ~15s of zero mouse movement → Sao dozes off
+NAP_AFTER_TICKS     = 900   # ~15s with the cursor away from her → Sao dozes off
+NAP_NEAR_PX         = 95    # cursor within this of her wakes her / blocks napping
 
 # Jump behaviour
 WIND_UP_TICKS       = 20    # ~0.33s crouch before launching
@@ -1205,6 +1206,8 @@ def main():
             overlay.set_greenbeans(bool(_ws.get('greenbeans', False)))
         if hasattr(overlay, 'set_grass_density'):
             overlay.set_grass_density(_ws.get('grass_density', 35))
+        if hasattr(overlay, 'set_grass_bed'):
+            overlay.set_grass_bed(_ws.get('grass_bed', 0))
         if hasattr(overlay, 'set_rock_density'):
             overlay.set_rock_density(_ws.get('rock_density', 0))
     except (OSError, ValueError, TypeError):
@@ -1243,6 +1246,8 @@ def main():
             overlay.set_greenbeans(bool(settings.get('greenbeans', False)))
         if hasattr(overlay, 'set_grass_density'):
             overlay.set_grass_density(settings.get('grass_density', 35))
+        if hasattr(overlay, 'set_grass_bed'):
+            overlay.set_grass_bed(settings.get('grass_bed', 0))
         if hasattr(overlay, 'set_rock_density'):
             overlay.set_rock_density(settings.get('rock_density', 0))
     _on_world_settings_changed = _apply_world_settings   # legacy alias
@@ -1894,6 +1899,9 @@ def main():
                     _land_spots.append((float(_lp.x), overlay.plant_top_y(_lp)))
         for _lr in rocks:
             _land_spots.append((float(_lr.x), overlay.rock_top_y(_lr)))
+        # While Sao naps she's a perch too — butterflies can land on her head.
+        if napping and cat.grounded:
+            _land_spots.append((cat.x + cat.width / 2, cat.y + 6.0))
 
         # Bounce wandering friend bugs off screen edges AND occasionally
         # commit a landing on a rock / flower / ladybug.  Ladybug ride is
@@ -2246,11 +2254,25 @@ def main():
 
         # ── idle pause (sit still, skip behaviour this tick) ─────────────
         # ── Macaron treat: spawn + physics (always runs, before idle/nap) ──
+        # Spawn it stuck to the cursor (pressing the hub macaron) so you can
+        # drag it straight out of the window; it drops when you release.
         if overlay.consume_feed_request() and macaron is None:
-            macaron = {'x': float(screen_w * 0.5), 'y': float(screen_floor),
-                       'vy': 0.0, 'state': 'falling'}
+            _mc0 = overlay.mapFromGlobal(QCursor.pos())
+            macaron = {'x': float(_mc0.x()), 'y': float(_mc0.y()),
+                       'vy': 0.0, 'state': 'cursor'}
         if macaron is not None:
-            if overlay.macaron_grabbed():
+            if macaron['state'] == 'cursor':
+                _mc = overlay.mapFromGlobal(QCursor.pos())
+                macaron['x'] = float(_mc.x())
+                macaron['y'] = float(_mc.y())
+                macaron['vy'] = 0.0
+                try:
+                    _lbtn = bool(ctypes.windll.user32.GetAsyncKeyState(0x01) & 0x8000)
+                except Exception:
+                    _lbtn = False
+                if not _lbtn:
+                    macaron['state'] = 'falling'   # released → let it drop
+            elif overlay.macaron_grabbed():
                 _dp = overlay.macaron_drag_pos()
                 macaron['x'] = float(_dp.x())
                 macaron['y'] = float(_dp.y())
@@ -2276,25 +2298,31 @@ def main():
             return
 
         # ── Napping ───────────────────────────────────────────────────────
-        # After a long stretch of zero mouse movement she dozes off: stands
-        # still on a single interact frame with little Z's floating up.  Any
-        # cursor movement (or a drag / leaving the taskbar) wakes her.
-        _np = QCursor.pos()
-        _np_moved = (abs(_np.x() - nap_cursor_ref[0])
-                     + abs(_np.y() - nap_cursor_ref[1])) > 3
-        nap_cursor_ref = (_np.x(), _np.y())
+        # After a long stretch with the cursor away from her she dozes off:
+        # stands still on a single interact frame with little Z's.  She wakes
+        # (with a tiny startled hop) only when the cursor comes NEAR her — not
+        # whenever the mouse moves somewhere else on screen.
+        _curn  = overlay.mapFromGlobal(QCursor.pos())
+        _ncx   = cat.x + cat.width / 2
+        _ncy   = cat.y + cat.height / 2
+        _near  = (abs(_curn.x() - _ncx) < NAP_NEAR_PX
+                  and abs(_curn.y() - _ncy) < NAP_NEAR_PX)
         if napping:
-            if (_np_moved or overlay.is_dragging or not cat.grounded
+            if (_near or overlay.is_dragging or not cat.grounded
                     or taskbar_state != 'normal' or macaron is not None):
                 napping   = False
                 nap_ticks = 0
+                # Startled awake by the cursor → a tiny hop.
+                if _near and cat.grounded and not overlay.is_dragging:
+                    cat = jump(cat, power=JUMP_MIN_POWER)
+                    is_jumping = True
             else:
                 cat = stop_walking(cat)
                 overlay.update_state(cat, platforms, anim_override='nap')
                 tick_count += 1
                 return
         else:
-            nap_ticks = 0 if _np_moved else nap_ticks + 1
+            nap_ticks = 0 if _near else nap_ticks + 1
             if (nap_ticks >= NAP_AFTER_TICKS and cat.grounded
                     and taskbar_state == 'normal' and not is_jumping
                     and not overlay.is_dragging and macaron is None):
@@ -2329,8 +2357,8 @@ def main():
                     _anim = 'run' if _run else None
                     # Jump up at it when it's dangled above her and she's under it
                     # (just a hopeful leap — she can't grab it mid-air).
-                    if (macaron['state'] in ('held', 'falling')
-                            and abs(_mdx) < 60 and (_feet - macaron['y']) > 28
+                    if (macaron['state'] in ('held', 'falling', 'cursor')
+                            and abs(_mdx) < 70 and (_feet - macaron['y']) > 24
                             and jump_cooldown == 0):
                         cat = jump(cat, power=JUMP_MIN_POWER * 1.15)
                         is_jumping   = True

@@ -79,14 +79,10 @@ _DISTURB_DECAY  = 0.045   # per-frame decay of a disturbance (springs back)
 # The last two layouts are taller "reedy" tufts, so ~25% of grass stands taller.
 _GRASS_TUFT_VARIANTS = 8
 # Density-slider maxima: number of TALL tufts at 100%.  (The grass amount is
-# count-based — this many tufts scattered across the floor.)  Above ~67% a
-# static short-grass "bed" also fills in behind them so max reads as a solid
-# grassland instead of scattered tufts with gaps.
-_GRASS_MAX = 96
+# count-based — this many tufts scattered across the floor.)  The short
+# backing-grass "bed" is a SEPARATE lever (set_grass_bed) drawn behind them.
+_GRASS_MAX = 192
 _ROCK_MAX  = 14
-# Short backing-grass bed: ramps in once the slider passes this %, reaching a
-# full carpet at 100%.  Static (doesn't sway) — it's the ground layer.
-_GRASS_BED_START = 40   # % below which there's no bed (keeps low settings sparse)
 
 
 class _GrassTuft:
@@ -269,6 +265,7 @@ class CatOverlay(QWidget):
         self._grass_bed_pm: 'QPixmap | None' = None
         self._grass_bed_dirty: bool = True
         self._grass_bed_baseline: int = 9   # px tall (a few art pixels)
+        self._grass_bed_density: int = 0    # own slider (0..100), separate from tufts
         # "Working inside an app" marker — (cx, top_y) of the window Sao has
         # ducked into, or None.  Drawn as a small coloured underline.
         self._work_ind: 'tuple[int, int] | None' = None
@@ -514,7 +511,18 @@ class CatOverlay(QWidget):
             return
         self._grass_density = v
         self._extra_grass = []          # rebuild lazily on next paint
-        self._grass_bed_dirty = True    # bed density depends on the slider
+        self.update()
+
+    def set_grass_bed(self, value) -> None:
+        """Short backing-grass 'bed' density 0..100 (its own hub lever)."""
+        try:
+            v = max(0, min(100, int(round(float(value)))))
+        except (TypeError, ValueError):
+            return
+        if v == self._grass_bed_density:
+            return
+        self._grass_bed_density = v
+        self._grass_bed_dirty = True
         self.update()
 
     def set_rock_density(self, value) -> None:
@@ -1444,36 +1452,38 @@ class CatOverlay(QWidget):
                 if not shrub.bush_style:
                     self._draw_shrub(painter, shrub)
 
-        # Grass-density carpet — extra tufts across the floor (slider-driven,
-        # always available).  Regenerated lazily after a density change.
-        if self._grass_density > 0 and self._garden_floor_y > 0:
-            if not self._extra_grass:
-                self._regen_extra_grass()
-            # Static short-grass bed behind everything (fills gaps at high
-            # density).  Rebuilt only on density/width change, then blitted.
-            if (self._grass_bed_dirty
-                    or (self._grass_bed_pm is not None
-                        and self._grass_bed_pm.width() != self.width())):
-                self._build_grass_bed()
-            if self._grass_bed_pm is not None:
-                painter.drawPixmap(
-                    0, self._garden_floor_y - self._grass_bed_baseline,
-                    self._grass_bed_pm)
-            # When the air is calm AND nothing is disturbed, blit one cached
-            # pixmap of the whole carpet instead of redrawing every tuft.
-            animating = (self._breeze_front is not None
-                         or self._disturb_ticks_left > 0)
-            if animating:
-                painter.setPen(Qt.PenStyle.NoPen)
-                for tuft in self._extra_grass:
-                    self._draw_grass_tuft(painter, tuft, self._garden_floor_y)
-            else:
-                pm = self._grass_carpet_pm
-                if pm is None or pm.width() != self.width():
-                    pm = self._build_grass_carpet()
-                if pm is not None:
+        if self._garden_floor_y > 0:
+            # Static short-grass BED (its own lever) — drawn behind the tufts.
+            # Rebuilt only on density/width change, then blitted in one go.
+            if self._grass_bed_density > 0:
+                if (self._grass_bed_dirty
+                        or (self._grass_bed_pm is not None
+                            and self._grass_bed_pm.width() != self.width())):
+                    self._build_grass_bed()
+                if self._grass_bed_pm is not None:
                     painter.drawPixmap(
-                        0, self._garden_floor_y - self._grass_carpet_baseline, pm)
+                        0, self._garden_floor_y - self._grass_bed_baseline,
+                        self._grass_bed_pm)
+
+            # Tall-tuft carpet (the "Grass" lever).  When the air is calm AND
+            # nothing is disturbed, blit one cached pixmap of the whole carpet
+            # instead of redrawing every tuft.
+            if self._grass_density > 0:
+                if not self._extra_grass:
+                    self._regen_extra_grass()
+                animating = (self._breeze_front is not None
+                             or self._disturb_ticks_left > 0)
+                if animating:
+                    painter.setPen(Qt.PenStyle.NoPen)
+                    for tuft in self._extra_grass:
+                        self._draw_grass_tuft(painter, tuft, self._garden_floor_y)
+                else:
+                    pm = self._grass_carpet_pm
+                    if pm is None or pm.width() != self.width():
+                        pm = self._build_grass_carpet()
+                    if pm is not None:
+                        painter.drawPixmap(
+                            0, self._garden_floor_y - self._grass_carpet_baseline, pm)
 
         # Foreground garden pass — remaining flowers drawn in front of Sao
         if self._garden is not None and not self._flowers_hidden:
@@ -2921,8 +2931,7 @@ class CatOverlay(QWidget):
         (it's baked into a pixmap), so it costs one blit per frame."""
         self._grass_bed_dirty = False
         self._grass_bed_pm = None
-        strength = (self._grass_density - _GRASS_BED_START) / float(100 - _GRASS_BED_START)
-        strength = max(0.0, min(1.0, strength))
+        strength = max(0.0, min(1.0, self._grass_bed_density / 100.0))
         if strength <= 0.0:
             return None
         w = max(1, self.width())
