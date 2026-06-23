@@ -193,6 +193,16 @@ def _foreground_is_fullscreen() -> bool:
         user32.GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
         if pid.value == os.getpid():
             return False
+        # Ignore the desktop + shell windows.  "Show desktop" (or clicking the
+        # desktop with all windows minimised) makes one of these the foreground
+        # window — and they ARE full-screen-sized — but they're the desktop, not
+        # a fullscreen app, so we must NOT hide Sao for them.
+        _cls = ctypes.create_unicode_buffer(64)
+        user32.GetClassNameW(hwnd, _cls, 64)
+        if _cls.value in ('Progman', 'WorkerW', 'Shell_TrayWnd',
+                          'Shell_SecondaryTrayWnd', 'WindowsDashboard',
+                          'XamlExplorerHostIslandWindow'):
+            return False
         rect = wintypes.RECT()
         user32.GetWindowRect(hwnd, ctypes.byref(rect))
         screen_w = user32.GetSystemMetrics(0)

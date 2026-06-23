@@ -78,10 +78,15 @@ _DISTURB_DECAY  = 0.045   # per-frame decay of a disturbance (springs back)
 # Number of distinct grass-tuft blade layouts (see _draw_grass_tuft).
 # The last two layouts are taller "reedy" tufts, so ~25% of grass stands taller.
 _GRASS_TUFT_VARIANTS = 8
-# Density-slider maxima: at 100% the grass carpet is ~10% denser than the old
-# fixed greenbeans lawn (60 → 66); rocks cap at a tasteful scatter.
-_GRASS_MAX = 66
+# Density-slider maxima: number of TALL tufts at 100%.  (The grass amount is
+# count-based — this many tufts scattered across the floor.)  Above ~67% a
+# static short-grass "bed" also fills in behind them so max reads as a solid
+# grassland instead of scattered tufts with gaps.
+_GRASS_MAX = 96
 _ROCK_MAX  = 14
+# Short backing-grass bed: ramps in once the slider passes this %, reaching a
+# full carpet at 100%.  Static (doesn't sway) — it's the ground layer.
+_GRASS_BED_START = 40   # % below which there's no bed (keeps low settings sparse)
 
 
 class _GrassTuft:
@@ -258,6 +263,11 @@ class CatOverlay(QWidget):
         # redrawing every tuft each frame.  Invalidated on density change.
         self._grass_carpet_pm: 'QPixmap | None' = None
         self._grass_carpet_baseline: int = 48   # px of headroom above the floor
+        # Static short-grass bed (the ground layer that fills gaps at high
+        # density).  Rebuilt on density/width change; blitted behind the tufts.
+        self._grass_bed_pm: 'QPixmap | None' = None
+        self._grass_bed_dirty: bool = True
+        self._grass_bed_baseline: int = 9   # px tall (a few art pixels)
         # "Working inside an app" marker — (cx, top_y) of the window Sao has
         # ducked into, or None.  Drawn as a small coloured underline.
         self._work_ind: 'tuple[int, int] | None' = None
@@ -493,6 +503,7 @@ class CatOverlay(QWidget):
             return
         self._grass_density = v
         self._extra_grass = []          # rebuild lazily on next paint
+        self._grass_bed_dirty = True    # bed density depends on the slider
         self.update()
 
     def set_rock_density(self, value) -> None:
@@ -1382,6 +1393,16 @@ class CatOverlay(QWidget):
         if self._grass_density > 0 and self._garden_floor_y > 0:
             if not self._extra_grass:
                 self._regen_extra_grass()
+            # Static short-grass bed behind everything (fills gaps at high
+            # density).  Rebuilt only on density/width change, then blitted.
+            if (self._grass_bed_dirty
+                    or (self._grass_bed_pm is not None
+                        and self._grass_bed_pm.width() != self.width())):
+                self._build_grass_bed()
+            if self._grass_bed_pm is not None:
+                painter.drawPixmap(
+                    0, self._garden_floor_y - self._grass_bed_baseline,
+                    self._grass_bed_pm)
             # When the air is calm AND nothing is disturbed, blit one cached
             # pixmap of the whole carpet instead of redrawing every tuft.
             animating = (self._breeze_front is not None
@@ -2772,6 +2793,40 @@ class CatOverlay(QWidget):
         if self._greenbeans:
             pm = self._green_rock(pm)
         self._extra_rock_cache[key] = pm
+        return pm
+
+    def _build_grass_bed(self) -> 'QPixmap | None':
+        """Render the static short-grass BED — a dense row of tiny blades across
+        the whole width that fills the gaps between the tall tufts.  It ramps in
+        above _GRASS_BED_START and reaches a solid carpet at 100%.  Doesn't move
+        (it's baked into a pixmap), so it costs one blit per frame."""
+        self._grass_bed_dirty = False
+        self._grass_bed_pm = None
+        strength = (self._grass_density - _GRASS_BED_START) / float(100 - _GRASS_BED_START)
+        strength = max(0.0, min(1.0, strength))
+        if strength <= 0.0:
+            return None
+        w = max(1, self.width())
+        H = self._grass_bed_baseline
+        pm = QPixmap(w, H + 2)
+        pm.fill(Qt.GlobalColor.transparent)
+        p = QPainter(pm)
+        p.setPen(Qt.PenStyle.NoPen)
+        # Spacing tightens as the slider climbs: sparse stubble → packed lawn.
+        spacing = max(2, int(round(7 - 5 * strength)))
+        rng = _rnd.Random(7)                 # fixed seed → stable bed each rebuild
+        cols = self._GRASS_COLS
+        x = 1
+        while x < w - 1:
+            shade = cols[rng.randrange(len(cols))]
+            col = QColor(*(shade[1] if rng.random() < 0.55 else shade[2]))
+            bh = 2 + int(round(strength * 2)) + rng.randint(0, 1)   # ~2–5 px tall
+            ww = 2 if (strength > 0.6 and rng.random() < 0.35) else 1
+            p.setBrush(col)
+            p.drawRect(x, H - bh, ww, bh)
+            x += spacing + rng.randint(0, 1)
+        p.end()
+        self._grass_bed_pm = pm
         return pm
 
     def _build_grass_carpet(self) -> 'QPixmap | None':

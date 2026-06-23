@@ -280,6 +280,28 @@ def aim_jump(cat: CatState, target: Platform) -> CatState:
     return replace(state, vx=vx * 0.5)         # 50% shorter horizontal
 
 
+def _snap_drop_platform(state, platforms):
+    """When the user releases a drag, find a window ledge to drop Sao onto even
+    if her feet aren't *exactly* on it — a forgiving catch so she doesn't fall
+    straight through a window she was clearly dropped on.  Returns the Platform
+    whose top is nearest her feet (within tolerance) and under her centre, else
+    None."""
+    SNAP_UP   = 34.0   # px her feet may be ABOVE a ledge and still catch
+    SNAP_DOWN = 16.0   # px her feet may be slightly BELOW the ledge and still catch
+    cx     = state.x + state.width / 2
+    bottom = state.y + state.height
+    best   = None
+    best_d = 1e9
+    for p in platforms:
+        if cx <= p.left or cx >= p.right:
+            continue
+        if (bottom - SNAP_UP) <= p.top <= (bottom + SNAP_DOWN):
+            d = abs(p.top - bottom)
+            if d < best_d:
+                best_d = d
+                best   = p
+    return best
+
 
 def main():
     parser = argparse.ArgumentParser(description="Desktop Cat")
@@ -1400,6 +1422,7 @@ def main():
     cursor_slide_vx  = 0.0  # physical px/tick the knocked cursor is still sliding
     punch_window_ticks = PUNCH_WINDOW_TICKS  # countdown of the current 3-min budget window
     punch_count_3min   = 0  # punches thrown in the current window (cap = PUNCH_MAX_PER_WINDOW)
+    was_dragging       = False  # True if Sao was being mouse-dragged last tick
     # Pester tracking — how many rapid passes the cursor has made over Sao.
     pester_count       = 0    # passes counted in the current window
     pester_decay       = 0    # ticks left before the count resets (rolling window)
@@ -1525,7 +1548,7 @@ def main():
         nonlocal attack_phase, cursor_low_ticks, approach_ticks
         nonlocal attack_ticks, attack_dir, attack_origin_x, attack_cooldown, cursor_slide_vx
         nonlocal punch_window_ticks, punch_count_3min, hover_stop_ticks
-        nonlocal pester_count, pester_decay, pester_was_over
+        nonlocal pester_count, pester_decay, pester_was_over, was_dragging
         nonlocal jump_ticks, jump_target_hwnd, jump_attempts, jump_cooldown
         nonlocal wind_up_ticks, pending_jump_target
         nonlocal walk_around_dir
@@ -1703,8 +1726,23 @@ def main():
             )
             is_jumping       = False
             jump_target_hwnd = None
+            # Picking her up cancels any taskbar-bottom excursion, so when she's
+            # released the floor is the taskbar top again (not the very bottom).
+            if taskbar_state != 'normal':
+                taskbar_state = 'normal'
+            was_dragging = True
 
         else:
+            # Just released this frame?  Try to catch a window ledge she was
+            # dropped near, so she reliably lands on it instead of falling
+            # through (forgiving — helps across DPI/geometry differences).
+            if was_dragging:
+                was_dragging = False
+                _drop = _snap_drop_platform(cat, _vis_platforms)
+                if _drop is not None:
+                    cat = replace(cat, y=float(_drop.top - cat.height),
+                                  vx=0.0, vy=0.0, grounded=True,
+                                  on_hwnd=_drop.hwnd)
             # ── physics + collision ───────────────────────────────────────
             # During taskbar drop/at_bottom, lower the hard floor to screen_h
             # so Sao can fall past the taskbar into the icon strip.
