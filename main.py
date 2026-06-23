@@ -1534,6 +1534,7 @@ def main():
     nap_cursor_ref     = (0, 0)  # cursor pos last tick, for movement detection
     macaron            = None    # {'x','y','vy','state'} treat on the desktop, or None
     macaron_eat_ticks  = 0       # ticks held in the 'eating' interact pose
+    meal_nap_timer     = 0       # >0 → counting down to a post-macaron food-coma nap
     # Pester tracking — how many rapid passes the cursor has made over Sao.
     pester_count       = 0    # passes counted in the current window
     pester_decay       = 0    # ticks left before the count resets (rolling window)
@@ -1661,6 +1662,7 @@ def main():
         nonlocal punch_window_ticks, punch_count_3min, hover_stop_ticks
         nonlocal pester_count, pester_decay, pester_was_over, was_dragging
         nonlocal nap_ticks, napping, nap_cursor_ref, macaron, macaron_eat_ticks
+        nonlocal meal_nap_timer
         nonlocal jump_ticks, jump_target_hwnd, jump_attempts, jump_cooldown
         nonlocal wind_up_ticks, pending_jump_target
         nonlocal walk_around_dir
@@ -2495,9 +2497,19 @@ def main():
                 return
         else:
             nap_ticks = 0 if _near else nap_ticks + 1
-            if (nap_ticks >= NAP_AFTER_TICKS and cat.grounded
-                    and taskbar_state == 'normal' and not is_jumping
-                    and not overlay.is_dragging and macaron is None):
+            # She gets sleepy in the evening — after 9 PM (and before 6 AM) she
+            # dozes off much sooner, so napping is more common at night.
+            _hr = _datetime.now().hour
+            _thresh = NAP_AFTER_TICKS * (0.4 if (_hr >= 21 or _hr < 6) else 1.0)
+            # Post-macaron food coma: once the timer elapses she nods off.
+            _coma = False
+            if meal_nap_timer > 0:
+                meal_nap_timer -= 1
+                if meal_nap_timer <= 0:
+                    _coma = True
+            if (cat.grounded and taskbar_state == 'normal' and not is_jumping
+                    and not overlay.is_dragging and macaron is None
+                    and (nap_ticks >= _thresh or _coma)):
                 napping = True
 
         # ── Macaron feeding: chase / jump-at / eat the treat, but only when
@@ -2518,6 +2530,8 @@ def main():
                         macaron_eat_ticks = 0
                         overlay.set_macaron(None, 0)
                         overlay.say(random.choice(_SAO_EAT_LINES))
+                        # Full + content → a food-coma nap after a little while.
+                        meal_nap_timer = random.randint(300, 540)   # ~5–9 s
                     overlay.update_state(cat, platforms, occluded=is_occluded,
                                          anim_override='interact_close')
                     tick_count += 1

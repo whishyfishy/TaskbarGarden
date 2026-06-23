@@ -646,8 +646,14 @@ class Snail:
     facing: int = 1   # 1 = moving right, -1 = moving left
 
     def tick(self) -> None:
-        self.x += self.vx
-        self.anim_phase += 0.06   # slow frame cycle
+        # Snail-like crawl: lurch forward when it stretches its neck at the START
+        # of the cycle, then barely move near the end (body catches up).  The
+        # burst peaks at frac=0 and fades to ~0 at frac=1; its average is 1 so
+        # the overall pace still matches vx.
+        frac  = (self.anim_phase % math.tau) / math.tau   # 0→1 within the cycle
+        burst = 3.0 * (1.0 - frac) ** 2
+        self.x += self.vx * burst
+        self.anim_phase += 0.06   # frame cycle
 
 
 def make_snail(screen_w: int, floor_y: float) -> 'Snail':
