@@ -90,14 +90,15 @@ _ROCK_MAX  = 14
 class _GrassTuft:
     """One decorative grass tuft in the density carpet.  Mutable so it can hold
     its own live disturbance state (set when Sao/cursor brushes past)."""
-    __slots__ = ('x', 'variant', 'scale', 'disturb', 'disturb_dir')
+    __slots__ = ('x', 'variant', 'scale', 'disturb', 'disturb_dir', 'layer')
 
-    def __init__(self, x: float, variant: int, scale: float):
+    def __init__(self, x: float, variant: int, scale: float, layer: int = 1):
         self.x = x
         self.variant = variant
         self.scale = scale
         self.disturb = 0.0       # 0..1 decaying amplitude
         self.disturb_dir = 0.0   # -1 / +1 knock direction
+        self.layer = layer       # 0 = behind Sao, 1 = in front of her
 
 # Hue shift (degrees) per flower variant (5 variants, one per flower type).
 # anim_type = variant % 5  →  0=green  1=blue  2=red  3=white  4=tall-blue
@@ -260,13 +261,13 @@ class CatOverlay(QWidget):
         # Pre-rendered static grass carpet (all tufts at rest).  Blitted in one
         # drawPixmap when the air is calm + nothing is disturbed, instead of
         # redrawing every tuft each frame.  Invalidated on density change.
-        self._grass_carpet_pm: 'QPixmap | None' = None
+        self._grass_carpet_pms: dict = {}       # layer (0=back,1=front) → cached pixmap
         self._grass_carpet_baseline: int = 48   # px of headroom above the floor
         # Static short-grass bed (the ground layer that fills gaps at high
         # density).  Rebuilt on density/width change; blitted behind the tufts.
         self._grass_bed_pm: 'QPixmap | None' = None
         self._grass_bed_dirty: bool = True
-        self._grass_bed_baseline: int = 9   # px tall (a few art pixels)
+        self._grass_bed_baseline: int = 13  # px tall (room for varied blade heights)
         self._grass_bed_density: int = 0    # own slider (0..100), separate from tufts
         # "Working inside an app" marker — (cx, top_y) of the window Sao has
         # ducked into, or None.  Drawn as a small coloured underline.
@@ -479,7 +480,7 @@ class CatOverlay(QWidget):
 
     def _regen_extra_grass(self) -> None:
         """(Re)build the grass-density carpet from the current slider value."""
-        self._grass_carpet_pm = None        # static cache is now stale
+        self._grass_carpet_pms = {}         # static caches are now stale
         n = round(self._grass_density / 100.0 * _GRASS_MAX)
         if n <= 0:
             self._extra_grass = []
@@ -487,10 +488,12 @@ class CatOverlay(QWidget):
             return
         rng = _rnd.Random(42)            # fixed seed → stable layout across paints
         w   = max(400, self.width())
+        # ~30% of tufts go BEHIND Sao (layer 0) for depth; the rest in front.
         self._extra_grass = [
             _GrassTuft(rng.randint(6, w - 6),
                        rng.randint(0, _GRASS_TUFT_VARIANTS - 1),
-                       rng.uniform(0.7, 1.5))
+                       rng.uniform(0.7, 1.5),
+                       layer=0 if rng.random() < 0.30 else 1)
             for _ in range(n)
         ]
         self._rebuild_all_grass()
@@ -503,12 +506,17 @@ class CatOverlay(QWidget):
             return
         rng = _rnd.Random(99)
         w   = max(400, self.width())
-        # Scale is relative to the small rock sprite — keep it in real-rock
-        # territory (a touch smaller up to noticeably bigger), never tiny.
-        self._extra_rocks = [
-            (rng.randint(14, w - 14), rng.uniform(0.9, 1.6))
-            for _ in range(n)
-        ]
+        # Mix the SMALL and MEDIUM rock sprites (like the real decor rocks) so
+        # the extras aren't all tiny — medium is the 2x sprite, so a 0.7-1.0x
+        # medium reads bigger than a scaled small.
+        out = []
+        for _ in range(n):
+            rx = rng.randint(16, w - 16)
+            if rng.random() < 0.45:
+                out.append((rx, 1, rng.uniform(0.7, 1.05)))   # medium base
+            else:
+                out.append((rx, 0, rng.uniform(1.1, 1.8)))    # small base, scaled up
+        self._extra_rocks = out
 
     def set_grass_density(self, value) -> None:
         """Grass carpet density 0..100 (hub slider).  Available always."""
@@ -1481,6 +1489,20 @@ class CatOverlay(QWidget):
         if self._blocks and self._garden_floor_y > 0:
             self._draw_blocks(painter, cat)
 
+        # Grass BED (ground layer) + the ~30% of tufts assigned BEHIND Sao,
+        # drawn before her so she appears to stand among the grass.
+        if self._garden_floor_y > 0:
+            if self._grass_bed_density > 0:
+                if (self._grass_bed_dirty
+                        or (self._grass_bed_pm is not None
+                            and self._grass_bed_pm.width() != self.width())):
+                    self._build_grass_bed()
+                if self._grass_bed_pm is not None:
+                    painter.drawPixmap(
+                        0, self._garden_floor_y - self._grass_bed_baseline,
+                        self._grass_bed_pm)
+            self._paint_grass_layer(painter, 0)
+
         # Sao on the floor → drawn in front of background layer
         if _cat_visible and not _on_window:
             _pos = self._drag_pos if self.is_dragging else QPoint(int(cat.x), int(cat.y))
@@ -1500,38 +1522,9 @@ class CatOverlay(QWidget):
                 if not shrub.bush_style:
                     self._draw_shrub(painter, shrub)
 
-        if self._garden_floor_y > 0:
-            # Static short-grass BED (its own lever) — drawn behind the tufts.
-            # Rebuilt only on density/width change, then blitted in one go.
-            if self._grass_bed_density > 0:
-                if (self._grass_bed_dirty
-                        or (self._grass_bed_pm is not None
-                            and self._grass_bed_pm.width() != self.width())):
-                    self._build_grass_bed()
-                if self._grass_bed_pm is not None:
-                    painter.drawPixmap(
-                        0, self._garden_floor_y - self._grass_bed_baseline,
-                        self._grass_bed_pm)
-
-            # Tall-tuft carpet (the "Grass" lever).  When the air is calm AND
-            # nothing is disturbed, blit one cached pixmap of the whole carpet
-            # instead of redrawing every tuft.
-            if self._grass_density > 0:
-                if not self._extra_grass:
-                    self._regen_extra_grass()
-                animating = (self._breeze_front is not None
-                             or self._disturb_ticks_left > 0)
-                if animating:
-                    painter.setPen(Qt.PenStyle.NoPen)
-                    for tuft in self._extra_grass:
-                        self._draw_grass_tuft(painter, tuft, self._garden_floor_y)
-                else:
-                    pm = self._grass_carpet_pm
-                    if pm is None or pm.width() != self.width():
-                        pm = self._build_grass_carpet()
-                    if pm is not None:
-                        painter.drawPixmap(
-                            0, self._garden_floor_y - self._grass_carpet_baseline, pm)
+        # Front grass tufts (~70%) — drawn over Sao for a "walking through it"
+        # look.  (The bed + back ~30% were drawn before her, above.)
+        self._paint_grass_layer(painter, 1)
 
         # Foreground garden pass — remaining flowers drawn in front of Sao
         if self._garden is not None and not self._flowers_hidden:
@@ -3061,17 +3054,20 @@ class CatOverlay(QWidget):
         small rock sprite scaled per-rock; greenbeans gives them mossy tint."""
         if not self._extra_rocks:
             self._regen_extra_rocks()
-        base = self._rock_pixmaps[0]
-        if base is None or base.isNull():
+        if not self._rock_pixmaps:
             return
         fy = self._garden_floor_y
-        for (rx, rscale) in self._extra_rocks:
-            pm = self._scaled_extra_rock(base, rscale)
+        for (rx, base_idx, rscale) in self._extra_rocks:
+            base = self._rock_pixmaps[min(base_idx, len(self._rock_pixmaps) - 1)]
+            if base is None or base.isNull():
+                continue
+            pm = self._scaled_extra_rock(base, base_idx, rscale)
             painter.drawPixmap(QPoint(int(rx) - pm.width() // 2, fy - pm.height()), pm)
 
-    def _scaled_extra_rock(self, base: 'QPixmap', rscale: float) -> 'QPixmap':
-        """Cached scaled (+ mossy in greenbeans) copy of the small rock sprite."""
-        key = (round(rscale, 2), self._greenbeans)
+    def _scaled_extra_rock(self, base: 'QPixmap', base_idx: int,
+                           rscale: float) -> 'QPixmap':
+        """Cached scaled (+ mossy in greenbeans) copy of a rock sprite."""
+        key = (base_idx, round(rscale, 2), self._greenbeans)
         pm  = self._extra_rock_cache.get(key)
         if pm is not None:
             return pm
@@ -3103,27 +3099,29 @@ class CatOverlay(QWidget):
         cols = self._GRASS_COLS
         rng = _rnd.Random(7)                 # fixed seed → stable bed each rebuild
         # Chunky, OVERLAPPING blades (2-3 px wide) so it reads as a lush mat, not
-        # thin hairs.  Step tightens with the slider but blades stay thick.
-        step = max(2, int(round(5 - 3 * strength)))      # 5 → 2 px between blades
+        # thin hairs.  IRREGULAR spacing + heights so it never looks stamped.
+        base_step = max(2, int(round(6 - 3 * strength)))   # avg gap shrinks w/ slider
         x = 0
         while x < w:
             shade = cols[rng.randrange(len(cols))]
-            # mid / light tones — a fresh, full lawn
-            col = QColor(*(shade[1] if rng.random() < 0.5 else shade[2]))
-            bh = 4 + int(round(strength * 3)) + rng.randint(0, 2)   # ~4–9 px tall
-            ww = 2 + (1 if rng.random() < 0.5 else 0)               # 2–3 px wide
+            # mix all three tones (dark/mid/light) for depth, weighted to mid
+            col = QColor(*shade[rng.choice((0, 1, 1, 2, 2))])
+            bh = 3 + int(round(strength * 4)) + rng.randint(0, 4)   # ~3–11 px, very varied
+            ww = 2 + (1 if rng.random() < 0.45 else 0)              # 2–3 px wide
             p.setBrush(col)
             p.drawRect(x, H - bh, ww, bh)
-            x += step + rng.randint(0, 1)
+            # Irregular gap: jitter ±2 around the average so it's not periodic.
+            x += max(1, base_step + rng.randint(-2, 3))
         p.end()
         self._grass_bed_pm = pm
         return pm
 
-    def _build_grass_carpet(self) -> 'QPixmap | None':
-        """Render the whole grass carpet at rest into one pixmap, so calm
-        frames blit it in a single drawPixmap.  Rebuilt only on density change
-        or width change (cached in self._grass_carpet_pm)."""
-        if not self._extra_grass:
+    def _build_grass_carpet(self, layer: int) -> 'QPixmap | None':
+        """Render the at-rest carpet for ONE depth layer (0=behind Sao, 1=front)
+        into a cached pixmap, so calm frames blit it in one drawPixmap."""
+        tufts = [t for t in self._extra_grass if t.layer == layer]
+        if not tufts:
+            self._grass_carpet_pms[layer] = None
             return None
         w  = max(1, self.width())
         base = self._grass_carpet_baseline
@@ -3133,11 +3131,32 @@ class CatOverlay(QWidget):
         p.setPen(Qt.PenStyle.NoPen)
         # At rest there's no breeze and every tuft.disturb is 0, so _grass_lean
         # returns 0 — the cached render matches the live per-tuft draw exactly.
-        for tuft in self._extra_grass:
+        for tuft in tufts:
             self._draw_grass_tuft(p, tuft, base)
         p.end()
-        self._grass_carpet_pm = pm
+        self._grass_carpet_pms[layer] = pm
         return pm
+
+    def _paint_grass_layer(self, painter: QPainter, layer: int) -> None:
+        """Draw one grass depth layer — cached blit when calm, per-tuft when a
+        breeze or disturbance is animating."""
+        if self._grass_density <= 0 or self._garden_floor_y <= 0:
+            return
+        if not self._extra_grass:
+            self._regen_extra_grass()
+        animating = (self._breeze_front is not None or self._disturb_ticks_left > 0)
+        if animating:
+            painter.setPen(Qt.PenStyle.NoPen)
+            for tuft in self._extra_grass:
+                if tuft.layer == layer:
+                    self._draw_grass_tuft(painter, tuft, self._garden_floor_y)
+        else:
+            pm = self._grass_carpet_pms.get(layer)
+            if pm is None or (not isinstance(pm, bool) and pm.width() != self.width()):
+                pm = self._build_grass_carpet(layer)
+            if pm:
+                painter.drawPixmap(
+                    0, self._garden_floor_y - self._grass_carpet_baseline, pm)
 
     def _draw_grass_tuft(self, painter: QPainter, tuft, fy: int) -> None:
         """Draw one grass tuft from the density carpet.  `tuft` is a _GrassTuft

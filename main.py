@@ -80,7 +80,7 @@ _SAO_DONE_LINES = ('Nice work! 🌸', 'One down! ✨', 'Proud of you 💛',
                    'Yay, done! 🌷', 'Keep it up! 🍃', 'So tidy! ✨',
                    'Lovely! 🌼', 'Look at you go! ⭐')
 _SAO_EAT_LINES  = ('nom nom ♡', 'mmm! 🍪', 'tasty~', 'yum! ♡', 'so good!')
-MACARON_NOTICE_PX = 360   # she only chases/eats a treat within this horizontal range
+MACARON_NOTICE_PX = 480   # she only chases/eats a treat within this horizontal range
 
 # Taskbar drop — Sao occasionally hops down into the taskbar to walk around
 TASKBAR_DROP_CHANCE  = 0.38   # probability per wander-change when on floor
@@ -242,7 +242,9 @@ def pick_jump_target(cat: CatState, platforms: list[Platform],
         dx = abs(plat_cx - cat_cx)
         dy = cat_bottom - p.top  # positive = platform is above
 
-        if p.w < MIN_JUMP_PLATFORM_W:
+        # Placed blocks are valid targets even when narrow (a single 22px block
+        # would otherwise be filtered out by the min-width rule).
+        if p.w < MIN_JUMP_PLATFORM_W and not blocks_data.is_block_hwnd(p.hwnd):
             continue
         if dx > JUMP_HORIZONTAL_RANGE:
             continue
@@ -1096,10 +1098,12 @@ def main():
     # Snail — a rare, slow ambient critter that crawls across the floor and
     # tucks under a big rock.  Behaves like the ladybug (edge-spawn, cooldown).
     snails: list[Snail]          = []
-    SNAIL_SPAWN_CHANCE           = 1.0 / 1200
-    SNAIL_COOLDOWN_MIN           = 4 * 60 * 60   # 4 min
-    SNAIL_COOLDOWN_MAX           = 9 * 60 * 60   # 9 min
-    snail_cooldown: int          = 3 * 60 * 60   # initial delay
+    # TEMP (testing): spawn constantly so the snail is easy to verify.  Revert
+    # to the rare values in the comments once confirmed working.
+    SNAIL_SPAWN_CHANCE           = 1.0           # rare: 1.0 / 1200
+    SNAIL_COOLDOWN_MIN           = 3 * 60        # rare: 4 * 60 * 60  (4 min)
+    SNAIL_COOLDOWN_MAX           = 6 * 60        # rare: 9 * 60 * 60  (9 min)
+    snail_cooldown: int          = 0             # rare: 3 * 60 * 60
     overlay.set_critters(bugs, butterflies, [], effects)
     overlay.set_friend_bugs(friend_bugs)
     overlay.set_lazy_bugs(lazy_bugs)
@@ -2508,17 +2512,20 @@ def main():
                     return
                 else:
                     macaron_eat_ticks = 0
-                    _run  = abs(_mdx) > 150
+                    # Follow the treat horizontally (run if it's a fair way off).
+                    _run  = abs(_mdx) > 90
                     cat   = walk(cat, 1 if _mdx > 0 else -1, run=_run)
                     _anim = 'run' if _run else None
-                    # Jump up at it when it's dangled above her and she's under it
-                    # (just a hopeful leap — she can't grab it mid-air).
+                    _above = _feet - macaron['y']   # how far above her feet it is
+                    # Hop at it ONLY when she's under it AND it's within a hopeful
+                    # reach height — otherwise she just trots along underneath it
+                    # (so she tracks the cursor instead of bouncing in place).
                     if (macaron['state'] in ('held', 'falling', 'cursor')
-                            and abs(_mdx) < 70 and (_feet - macaron['y']) > 24
+                            and abs(_mdx) < 55 and 24 < _above < 170
                             and jump_cooldown == 0):
-                        cat = jump(cat, power=JUMP_MIN_POWER * 1.15)
+                        cat = jump(cat, power=JUMP_MIN_POWER * 1.2)
                         is_jumping   = True
-                        jump_cooldown = 24
+                        jump_cooldown = 50
                         _anim = None
                     overlay.update_state(cat, platforms, occluded=is_occluded,
                                          anim_override=_anim)
@@ -2540,10 +2547,23 @@ def main():
         # behind the covering window first, then jump once it's visible again.
         if (cat.grounded and jump_cooldown == 0 and not is_occluded
                 and taskbar_state == 'normal' and walk_around_dir == 0):
-            jump_ticks += 1
-            if jump_ticks >= JUMP_CONSIDER_TICKS:
+            # If a placed block is within reach she gets eager — consider jumps
+            # much more often (and more likely) so blocks are fun to play on.
+            _block_near = False
+            if blocks:
+                _scx  = cat.x + cat.width / 2
+                _feet = cat.y + cat.height
+                for (c, r) in blocks:
+                    bx, by, bw, bh = blocks_data.cell_rect(c, r, screen_floor)
+                    if (abs((bx + bw / 2) - _scx) < 170
+                            and -12 < (_feet - by) < JUMP_MAX_HEIGHT):
+                        _block_near = True
+                        break
+            jump_ticks += 5 if _block_near else 1
+            _thresh = (JUMP_CONSIDER_TICKS // 4) if _block_near else JUMP_CONSIDER_TICKS
+            if jump_ticks >= _thresh:
                 jump_ticks = 0
-                if random.random() < JUMP_CHANCE:
+                if random.random() < (0.7 if _block_near else JUMP_CHANCE):
                     # If a fullscreen window covers the screen, skip jumping (edges are now walls)
                     if has_fullscreen_window(scanner.z_order, phys_screen_w, phys_screen_h):
                         pass   # walk-around disabled — edges are walls

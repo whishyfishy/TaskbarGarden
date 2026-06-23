@@ -919,10 +919,17 @@ function IOSSettingsScreen({ bridge, onSyncCanvas, syncMsg, light, setLight }) {
   const [world, setWorld] = React.useState(null);   // world_settings.json
   React.useEffect(() => {
     if (!bridge || !bridge.getWorldSettings) return;
-    try { bridge.getWorldSettings((j) => {
-      let w = {}; try { w = JSON.parse(j || '{}'); } catch (e) {}
-      setWorld(w);
-    }); } catch (e) {}
+    const fetchWorld = () => {
+      try { bridge.getWorldSettings((j) => {
+        let w = {}; try { w = JSON.parse(j || '{}'); } catch (e) {}
+        setWorld(w);
+      }); } catch (e) {}
+    };
+    fetchWorld();
+    // Re-poll so changes made outside the hub show up here — e.g. pressing Esc
+    // to leave block mode writes block_mode=false and flips the toggle.
+    const id = setInterval(fetchWorld, 1500);
+    return () => clearInterval(id);
   }, [bridge]);
   // Run-on-startup (Windows HKCU\...\Run entry), read/written via the bridge.
   const [launchLogin, setLaunchLogin] = React.useState(false);
