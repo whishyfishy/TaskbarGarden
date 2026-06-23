@@ -1309,6 +1309,8 @@ def main():
             overlay.set_grass_density(_ws.get('grass_density', 35))
         if hasattr(overlay, 'set_grass_bed'):
             overlay.set_grass_bed(_ws.get('grass_bed', 0))
+        if hasattr(overlay, 'set_extra_tall_grass'):
+            overlay.set_extra_tall_grass(bool(_ws.get('extra_tall_grass', False)))
         if hasattr(overlay, 'set_rock_density'):
             overlay.set_rock_density(_ws.get('rock_density', 0))
         if hasattr(overlay, 'set_block_mode'):
@@ -1351,6 +1353,8 @@ def main():
             overlay.set_grass_density(settings.get('grass_density', 35))
         if hasattr(overlay, 'set_grass_bed'):
             overlay.set_grass_bed(settings.get('grass_bed', 0))
+        if hasattr(overlay, 'set_extra_tall_grass'):
+            overlay.set_extra_tall_grass(bool(settings.get('extra_tall_grass', False)))
         if hasattr(overlay, 'set_rock_density'):
             overlay.set_rock_density(settings.get('rock_density', 0))
         if hasattr(overlay, 'set_block_mode'):

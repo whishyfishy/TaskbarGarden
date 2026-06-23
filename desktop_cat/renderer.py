@@ -80,6 +80,9 @@ _DISTURB_DECAY  = 0.025   # per-frame decay — slow so the bent blade HOLDS a b
 # Number of distinct grass-tuft blade layouts (see _draw_grass_tuft).
 # The last two layouts are taller "reedy" tufts, so ~25% of grass stands taller.
 _GRASS_TUFT_VARIANTS = 8
+# Extra height multiplier for the ~30% of tufts flagged tall when the
+# "Extra tall grass" toggle is on (applied to blade height only, not width).
+_GRASS_TALL_MULT = 1.85
 # Density-slider maxima: number of TALL tufts at 100%.  (The grass amount is
 # count-based — this many tufts scattered across the floor.)  The short
 # backing-grass "bed" is a SEPARATE lever (set_grass_bed) drawn behind them.
@@ -90,15 +93,17 @@ _ROCK_MAX  = 14
 class _GrassTuft:
     """One decorative grass tuft in the density carpet.  Mutable so it can hold
     its own live disturbance state (set when Sao/cursor brushes past)."""
-    __slots__ = ('x', 'variant', 'scale', 'disturb', 'disturb_dir', 'layer')
+    __slots__ = ('x', 'variant', 'scale', 'disturb', 'disturb_dir', 'layer', 'tall')
 
-    def __init__(self, x: float, variant: int, scale: float, layer: int = 1):
+    def __init__(self, x: float, variant: int, scale: float,
+                 layer: int = 1, tall: bool = False):
         self.x = x
         self.variant = variant
         self.scale = scale
         self.disturb = 0.0       # 0..1 decaying amplitude
         self.disturb_dir = 0.0   # -1 / +1 knock direction
         self.layer = layer       # 0 = behind Sao, 1 = in front of her
+        self.tall = tall         # extra-tall variation (when the toggle is on)
 
 # Hue shift (degrees) per flower variant (5 variants, one per flower type).
 # anim_type = variant % 5  →  0=green  1=blue  2=red  3=white  4=tall-blue
@@ -269,6 +274,7 @@ class CatOverlay(QWidget):
         self._grass_bed_dirty: bool = True
         self._grass_bed_baseline: int = 13  # px tall (room for varied blade heights)
         self._grass_bed_density: int = 0    # own slider (0..100), separate from tufts
+        self._extra_tall_grass: bool = False  # ~30% of tufts grow extra tall
         # "Working inside an app" marker — (cx, top_y) of the window Sao has
         # ducked into, or None.  Drawn as a small coloured underline.
         self._work_ind: 'tuple[int, int] | None' = None
@@ -488,12 +494,14 @@ class CatOverlay(QWidget):
             return
         rng = _rnd.Random(42)            # fixed seed → stable layout across paints
         w   = max(400, self.width())
-        # ~30% of tufts go BEHIND Sao (layer 0) for depth; the rest in front.
+        # ~30% of tufts go BEHIND Sao (layer 0) for depth; ~30% are flagged tall
+        # (extra-tall when that toggle is on).  Both rolled independently.
         self._extra_grass = [
             _GrassTuft(rng.randint(6, w - 6),
                        rng.randint(0, _GRASS_TUFT_VARIANTS - 1),
                        rng.uniform(0.7, 1.5),
-                       layer=0 if rng.random() < 0.30 else 1)
+                       layer=0 if rng.random() < 0.30 else 1,
+                       tall=rng.random() < 0.30)
             for _ in range(n)
         ]
         self._rebuild_all_grass()
@@ -528,6 +536,15 @@ class CatOverlay(QWidget):
             return
         self._grass_density = v
         self._extra_grass = []          # rebuild lazily on next paint
+        self.update()
+
+    def set_extra_tall_grass(self, on: bool) -> None:
+        """Toggle the extra-tall variation on ~30% of grass tufts."""
+        on = bool(on)
+        if on == self._extra_tall_grass:
+            return
+        self._extra_tall_grass = on
+        self._grass_carpet_pms = {}   # heights changed → rebuild cached carpets
         self.update()
 
     def set_grass_bed(self, value) -> None:
@@ -3172,10 +3189,13 @@ class CatOverlay(QWidget):
         LD, LM, LL = self._GRASS_COLS[variant % len(self._GRASS_COLS)]
         # Total lean for this tuft's position (px, can be fractional).
         lean = self._grass_lean(cx, tuft)
+        # Extra-tall variation: ~30% of tufts grow taller (height only, not
+        # width) when the toggle is on.
+        h_mult = _GRASS_TALL_MULT if (self._extra_tall_grass and tuft.tall) else 1.0
         painter.setPen(Qt.PenStyle.NoPen)
 
         for bx_off, bh in blades:
-            bh   = max(2, int(round(bh * scale)))
+            bh   = max(2, int(round(bh * scale * h_mult)))
             bx   = cx + int(round(bx_off * scale))
             split = bh * 2 // 3
             # Lower (rooted) section stays put; upper sections lean with wind.

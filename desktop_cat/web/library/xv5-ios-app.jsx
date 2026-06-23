@@ -1122,6 +1122,10 @@ function IOSSettingsScreen({ bridge, onSyncCanvas, syncMsg, light, setLight }) {
             value={world && world.grass_bed != null ? world.grass_bed : 0}
             onChange={e => patchWorld({ grass_bed: +e.target.value })} />
         </Row>
+        <Row k="Extra tall grass" sub="Makes ~30% of the grass tufts grow extra tall for variation">
+          <Switch on={!!(world && world.extra_tall_grass)}
+            onClick={() => patchWorld({ extra_tall_grass: !(world && world.extra_tall_grass) })} />
+        </Row>
         <Row k="Extra rocks" sub="Scatter a few more pebbles across the ground">
           <input type="range" className="ios-range" min="0" max="100" step="5"
             style={{ width: 128 }}
