@@ -74,7 +74,8 @@ _BREEZE_GAP    = (480, 1100)   # ticks of calm between breezes (random in range)
 _DISTURB_RADIUS_SAO    = 26.0  # px — Sao's body is wide, so a moderate reach
 _DISTURB_RADIUS_CURSOR = 14.0  # px — cursor must be almost literally on the tuft
 _DISTURB_AMP    = 5.0     # px lean at full disturbance
-_DISTURB_DECAY  = 0.045   # per-frame decay of a disturbance (springs back)
+_DISTURB_DECAY  = 0.025   # per-frame decay — slow so the bent blade HOLDS a beat
+                          # (~0.7s) and eases back gently (not a quick/rigid snap)
 
 # Number of distinct grass-tuft blade layouts (see _draw_grass_tuft).
 # The last two layouts are taller "reedy" tufts, so ~25% of grass stands taller.
@@ -1644,12 +1645,14 @@ class CatOverlay(QWidget):
         S = blocks_data.BLOCK_SIZE
         T = 2
         n = S // T
+        # Grass tones taken from the ground grass palette (_GRASS_COLS) so the
+        # blocks blend with the lawn rather than looking like stark MC blocks.
         if style == blocks_data.STYLE_DIRT:
-            top = [(96, 168, 72), (80, 148, 58), (108, 182, 84)]
-            bod = [(126, 88, 54), (110, 76, 46), (140, 100, 64), (98, 68, 42)]
+            top = [(52, 125, 55), (82, 165, 74), (65, 138, 64)]
+            bod = [(126, 90, 58), (112, 80, 50), (138, 102, 66), (104, 74, 48)]
             grass_rows = 3
         else:
-            top = [(96, 168, 72), (80, 148, 58), (108, 182, 84), (70, 132, 52)]
+            top = [(52, 125, 55), (82, 165, 74), (65, 138, 64), (44, 112, 78)]
             bod = top
             grass_rows = n
         pm = QPixmap(S, S)
@@ -3097,19 +3100,21 @@ class CatOverlay(QWidget):
         pm.fill(Qt.GlobalColor.transparent)
         p = QPainter(pm)
         p.setPen(Qt.PenStyle.NoPen)
-        # Spacing tightens as the slider climbs: sparse stubble → packed lawn.
-        spacing = max(2, int(round(7 - 5 * strength)))
-        rng = _rnd.Random(7)                 # fixed seed → stable bed each rebuild
         cols = self._GRASS_COLS
-        x = 1
-        while x < w - 1:
+        rng = _rnd.Random(7)                 # fixed seed → stable bed each rebuild
+        # Chunky, OVERLAPPING blades (2-3 px wide) so it reads as a lush mat, not
+        # thin hairs.  Step tightens with the slider but blades stay thick.
+        step = max(2, int(round(5 - 3 * strength)))      # 5 → 2 px between blades
+        x = 0
+        while x < w:
             shade = cols[rng.randrange(len(cols))]
-            col = QColor(*(shade[1] if rng.random() < 0.55 else shade[2]))
-            bh = 2 + int(round(strength * 2)) + rng.randint(0, 1)   # ~2–5 px tall
-            ww = 2 if (strength > 0.6 and rng.random() < 0.35) else 1
+            # mid / light tones — a fresh, full lawn
+            col = QColor(*(shade[1] if rng.random() < 0.5 else shade[2]))
+            bh = 4 + int(round(strength * 3)) + rng.randint(0, 2)   # ~4–9 px tall
+            ww = 2 + (1 if rng.random() < 0.5 else 0)               # 2–3 px wide
             p.setBrush(col)
             p.drawRect(x, H - bh, ww, bh)
-            x += spacing + rng.randint(0, 1)
+            x += step + rng.randint(0, 1)
         p.end()
         self._grass_bed_pm = pm
         return pm

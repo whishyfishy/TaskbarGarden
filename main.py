@@ -37,6 +37,7 @@ from desktop_cat.inventory import FLOWER_PLANT_CAP, MACRON_PLANT_CAP
 from desktop_cat.critters import (Bug, Butterfly, CollectEffect, Shrub, Rock,
                                    FriendBug, make_friend_bug,
                                    LazyBug, make_lazy_bug,
+                                   Snail, make_snail,
                                    make_bug, make_butterfly,
                                    make_collect_effect, make_butterfly_pop,
                                    make_shrub, make_rock)
@@ -1092,9 +1093,17 @@ def main():
     # Visibility toggles driven by hub Settings → world_settings.json.
     cat_hidden: bool             = False   # hide Sao herself
     creatures_hidden: bool       = False   # hide butterflies / ladybugs / friend-bugs
+    # Snail — a rare, slow ambient critter that crawls across the floor and
+    # tucks under a big rock.  Behaves like the ladybug (edge-spawn, cooldown).
+    snails: list[Snail]          = []
+    SNAIL_SPAWN_CHANCE           = 1.0 / 1200
+    SNAIL_COOLDOWN_MIN           = 4 * 60 * 60   # 4 min
+    SNAIL_COOLDOWN_MAX           = 9 * 60 * 60   # 9 min
+    snail_cooldown: int          = 3 * 60 * 60   # initial delay
     overlay.set_critters(bugs, butterflies, [], effects)
     overlay.set_friend_bugs(friend_bugs)
     overlay.set_lazy_bugs(lazy_bugs)
+    overlay.set_snails(snails)
     overlay.set_dust(dust_particles)
 
     # Shrubs — grass tufts biased toward screen edges (avoid middle third)
@@ -1665,6 +1674,7 @@ def main():
         nonlocal punch_still_ref_x, punch_still_ref_y, punch_still_ticks
         nonlocal friend_bug_cursor_cooldown
         nonlocal ladybug_cooldown, ladybug_visit_ticks, ladybug_leaving
+        nonlocal snail_cooldown
         nonlocal task_flowers, falling_seeds
         nonlocal hop_down_ignore_hwnd, _occlude_raw_ticks, occluded_ticks, is_occluded, is_paused
         nonlocal _has_fullscreen
@@ -2205,6 +2215,34 @@ def main():
                 ladybug_leaving = False
                 ladybug_visit_ticks = 0
                 ladybug_cooldown = random.randint(LADYBUG_COOLDOWN_MIN, LADYBUG_COOLDOWN_MAX)
+
+        # ── Snail — rare, slow crawl across the floor; tucks under a big rock ──
+        if not creatures_hidden:
+            if not snails:
+                if snail_cooldown > 0:
+                    snail_cooldown -= 1
+                elif random.random() < SNAIL_SPAWN_CHANCE:
+                    snails.append(make_snail(screen_w, float(screen_floor)))
+            for _sn in snails:
+                _sn.tick()
+            if snails:
+                # Despawn when fully off-screen, or when it reaches a big rock
+                # (variant >= 1) — it "hides" underneath (drawn behind it).
+                _big_rock_xs = [r.x for r in rocks if getattr(r, 'variant', 0) >= 1]
+                _survivors = []
+                for _sn in snails:
+                    if _sn.x < -30 or _sn.x > screen_w + 30:
+                        continue
+                    if any(abs(_sn.x - rx) < 8 for rx in _big_rock_xs):
+                        continue   # tucked under a rock → gone
+                    _survivors.append(_sn)
+                if len(_survivors) != len(snails):
+                    snails[:] = _survivors
+                    if not snails:
+                        snail_cooldown = random.randint(SNAIL_COOLDOWN_MIN,
+                                                        SNAIL_COOLDOWN_MAX)
+        elif snails:
+            snails.clear()
 
         # ── ABug3 (Friend Bug) — small pastel bugs that fly in & land on cursor ──
         _cur = overlay.mapFromGlobal(QCursor.pos())
