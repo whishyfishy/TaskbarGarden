@@ -58,7 +58,9 @@ SCAN_EVERY = 3              # scan windows every 3rd tick (~20 Hz)
 # Wandering
 WANDER_CHANGE_TICKS = 420   # ~7s between direction changes (calmer pace)
 IDLE_PAUSE_TICKS    = 220   # ~3.7s forced pause after landing (heavier idle)
-NAP_AFTER_TICKS     = 900   # ~15s with the cursor away from her → Sao dozes off
+NAP_AFTER_TICKS     = 5400  # ~90s with the cursor away → Sao dozes off (daytime).
+                            # After 9 PM this is scaled to 40% (~36s), so she
+                            # naps much more often at night.
 NAP_NEAR_PX         = 95    # cursor within this of her wakes her / blocks napping
 
 # Jump behaviour
