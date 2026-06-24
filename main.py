@@ -84,15 +84,16 @@ _SAO_DONE_LINES = ('Nice work! 🌸', 'One down! ✨', 'Proud of you 💛',
 _SAO_EAT_LINES  = ('nom nom ♡', 'mmm! 🍪', 'tasty~', 'yum! ♡', 'so good!')
 MACARON_NOTICE_PX = 480   # she only chases/eats a treat within this horizontal range
 # Beach ball — floaty (low gravity, air-filled bounce) toy Sao bats with her paw.
-BALL_RADIUS      = 16
-BALL_GRAVITY     = 0.5     # low → it falls gently (air inside)
-BALL_RESTITUTION = 0.72    # bounciness
+BALL_RADIUS      = 14      # ~15% smaller than before
+BALL_GRAVITY     = 0.34    # lower → floatier, falls gently (lots of air inside)
+BALL_RESTITUTION = 0.74    # bounciness
 BALL_AIR         = 0.992   # gentle drag
-BALL_REST_VY     = 1.3     # below this bounce speed at the floor → it settles
+BALL_REST_VY     = 1.0     # below this bounce speed at the floor → it settles
 BALL_KICK        = 9.0     # horizontal impulse from a bat
-BALL_POP         = 7.0     # upward impulse from a bat
-BALL_NOTICE      = 96      # how close (horizontal) before she bats it
-BALL_PUNCH_CD    = 36      # ticks between bats (it's a toy, no hard rate-limit)
+BALL_POP         = 7.0     # base upward impulse from a bat (randomised per hit)
+BALL_NOTICE      = 640     # how close (horizontal) before she notices / chases it
+BALL_PUNCH_CD    = 20      # ticks between bats (it's a toy, no hard rate-limit)
+BALL_APPROACH_MAX = 700    # she'll chase/wait under the ball this long before giving up
 
 # Taskbar drop — Sao occasionally hops down into the taskbar to walk around
 TASKBAR_DROP_CHANCE  = 0.38   # probability per wander-change when on floor
@@ -2579,12 +2580,20 @@ def main():
                 ball['vy'] += BALL_GRAVITY
                 ball['vx'] *= BALL_AIR
                 ball['vy'] *= BALL_AIR
+                # A breeze nudges a near-stationary ball downwind (teeny bit).
+                if abs(ball['vx']) < 0.4 and ball['y'] + R >= screen_floor - 2:
+                    _wind = overlay.breeze_strength_at(ball['x']) if hasattr(overlay, 'breeze_strength_at') else 0.0
+                    if _wind > 0.0:
+                        ball['vx'] += _wind * 0.18                # wind from the left → drift right
                 ball['x'] += ball['vx']
                 ball['y'] += ball['vy']
                 if ball['y'] + R >= screen_floor:               # floor bounce
                     ball['y'] = float(screen_floor - R)
-                    ball['vy'] = (-ball['vy'] * BALL_RESTITUTION
-                                  if ball['vy'] > BALL_REST_VY else 0.0)
+                    if ball['vy'] > BALL_REST_VY:
+                        # bounce back up, with a little random variation in height
+                        ball['vy'] = -ball['vy'] * BALL_RESTITUTION * random.uniform(0.9, 1.18)
+                    else:
+                        ball['vy'] = 0.0
                     ball['vx'] *= 0.96                            # rolling friction
                 if ball['x'] - R < 0:                             # walls
                     ball['x'] = float(R); ball['vx'] = abs(ball['vx']) * BALL_RESTITUTION
@@ -2740,7 +2749,11 @@ def main():
         # No jumping while occluded: the cat must walk sideways out from
         # behind the covering window first, then jump once it's visible again.
         if (cat.grounded and jump_cooldown == 0 and not is_occluded
-                and taskbar_state == 'normal' and walk_around_dir == 0):
+                and taskbar_state == 'normal' and walk_around_dir == 0
+                and wind_up_ticks == 0 and pending_jump_target is None):
+            # Guard above: don't re-consider while already winding up — the eager
+            # block re-trigger was resetting wind_up_ticks every few ticks so the
+            # jump never fired and she froze in the crouch.
             # If a placed block is within reach she gets eager — consider jumps
             # much more often (and more likely) so blocks are fun to play on.
             _block_near = False
@@ -3496,8 +3509,8 @@ def main():
             if elapsed == PUNCH_SWING_ELAPSED:
                 if attack_target == 'ball':
                     if ball is not None:
-                        ball['vx'] = float(attack_dir) * BALL_KICK   # bat it away
-                        ball['vy'] = -BALL_POP                       # and up a bit
+                        ball['vx'] = float(attack_dir) * BALL_KICK * random.uniform(0.85, 1.25)
+                        ball['vy'] = -BALL_POP * random.uniform(0.7, 1.4)   # varied height
                 else:
                     cursor_slide_vx = float(attack_dir) * PUNCH_CURSOR_KICK
                     # Immediate first shove + a one-time upward pop.
@@ -3524,24 +3537,28 @@ def main():
             _cat_cx = cat.x + cat.width / 2
             approach_ticks += 1
             if attack_target == 'ball':
-                # Chase the bouncing ball; bat it once she's close + grounded.
-                if ball is None or not cat.grounded or approach_ticks > PUNCH_APPROACH_MAX:
+                # Chase the bouncing ball — follow its x and wait under it, then
+                # bat it once it drops low + she's close.
+                if ball is None or not cat.grounded or approach_ticks > BALL_APPROACH_MAX:
                     attack_phase  = ''
                     attack_target = 'cursor'
                     attack_cooldown = 10
                     cat = stop_walking(cat)
                 else:
                     _dx = ball['x'] - _cat_cx
-                    if abs(_dx) <= PUNCH_RANGE + BALL_RADIUS:
+                    _ball_low = ball['y'] + BALL_RADIUS >= screen_floor - 42
+                    if abs(_dx) <= PUNCH_RANGE + BALL_RADIUS and _ball_low:
                         attack_phase    = 'punch'
                         attack_ticks    = PUNCH_ANIM_TICKS
                         attack_dir      = 1 if _dx >= 0 else -1
                         attack_origin_x = float(cat.x)
                         cat = stop_walking(cat)
-                    else:
-                        _run = abs(_dx) > 120
+                    elif abs(_dx) > 10:
+                        _run = abs(_dx) > 110
                         cat = walk(cat, 1 if _dx > 0 else -1, run=_run)
                         anim_override = 'run' if _run else None
+                    else:
+                        cat = stop_walking(cat)   # under it, waiting for it to fall
             else:
                 _cur = overlay.mapFromGlobal(QCursor.pos())
                 _dx  = _cur.x() - _cat_cx
@@ -3566,8 +3583,10 @@ def main():
             _started = False
             if ball is not None and ball_punch_cd == 0:
                 _bdx = ball['x'] - (cat.x + cat.width / 2)
-                _ball_low = ball['y'] + BALL_RADIUS >= screen_floor - 36
-                if abs(_bdx) < BALL_NOTICE and _ball_low:
+                # Start chasing whenever it's within range — even while it's
+                # still bouncing high — so she follows it around and waits under
+                # it to bat it again.
+                if abs(_bdx) < BALL_NOTICE:
                     attack_phase   = 'approach'
                     attack_target  = 'ball'
                     approach_ticks = 0

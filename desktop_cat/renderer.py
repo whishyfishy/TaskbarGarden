@@ -298,7 +298,7 @@ class CatOverlay(QWidget):
         # Beach ball — a placeable bouncy toy Sao bats around.  main owns the
         # physics; the overlay draws it + lets the user drag it like the macaron.
         self._ball: 'tuple | None' = None       # (cx, cy) draw centre, or None
-        self._ball_radius: int = 16
+        self._ball_radius: int = 14   # ~15% smaller (keep in sync with BALL_RADIUS)
         self._ball_color = (235, 90, 90)        # rgb; set from world settings
         self._ball_grab: bool = False
         self._ball_grab_off = QPoint(0, 0)
@@ -638,6 +638,13 @@ class CatOverlay(QWidget):
             return 0.0
         env = math.exp(-((x - self._breeze_front) / _BREEZE_WIDTH) ** 2)
         return _BREEZE_AMP * env * math.sin(_WIND_K * x - self._breeze_phase)
+
+    def breeze_strength_at(self, x: float) -> float:
+        """Gust envelope (0..1) at world-x `x`, or 0 if the air is calm.  Used to
+        nudge a resting beach ball downwind a teeny bit."""
+        if self._breeze_front is None:
+            return 0.0
+        return math.exp(-((x - self._breeze_front) / _BREEZE_WIDTH) ** 2)
 
     def _grass_lean(self, x: float, obj) -> float:
         """Total blade lean (px) for a tuft/shrub: the breeze plus its own
