@@ -295,6 +295,15 @@ class CatOverlay(QWidget):
         self._macaron_grab_off = QPoint(0, 0)
         self._macaron_drag_pt  = QPoint(0, 0)
         self._feed_requested: bool = False      # set by the hub bridge, drained by main
+        # Beach ball — a placeable bouncy toy Sao bats around.  main owns the
+        # physics; the overlay draws it + lets the user drag it like the macaron.
+        self._ball: 'tuple | None' = None       # (cx, cy) draw centre, or None
+        self._ball_radius: int = 16
+        self._ball_color = (235, 90, 90)        # rgb; set from world settings
+        self._ball_grab: bool = False
+        self._ball_grab_off = QPoint(0, 0)
+        self._ball_drag_pt  = QPoint(0, 0)
+        self._ball_requested: bool = False
         # Placeable blocks (2D-Minecraft).  main owns the dict {(c,r): style};
         # the overlay draws them, shows the grid, and handles placement clicks.
         self._blocks: dict = {}                 # shared ref, set by main
@@ -810,6 +819,36 @@ class CatOverlay(QWidget):
     def macaron_drag_pos(self) -> QPoint:
         return self._macaron_drag_pt
 
+    # ── Beach ball ──────────────────────────────────────────────────────
+    def request_ball(self) -> None:
+        self._ball_requested = True
+
+    def consume_ball_request(self) -> bool:
+        if self._ball_requested:
+            self._ball_requested = False
+            return True
+        return False
+
+    def set_ball(self, cx, cy) -> None:
+        self._ball = None if cx is None else (float(cx), float(cy))
+
+    def set_ball_color(self, rgb) -> None:
+        try:
+            self._ball_color = (int(rgb[0]), int(rgb[1]), int(rgb[2]))
+            self.update()
+        except (TypeError, ValueError, IndexError):
+            pass
+
+    @property
+    def ball_radius(self) -> int:
+        return self._ball_radius
+
+    def ball_grabbed(self) -> bool:
+        return self._ball_grab
+
+    def ball_drag_pos(self) -> QPoint:
+        return self._ball_drag_pt
+
     # ── Blocks ──────────────────────────────────────────────────────────
     def set_blocks(self, blocks: dict) -> None:
         """Share main's {(c,r): style} dict so the overlay can draw + edit it."""
@@ -1199,6 +1238,16 @@ class CatOverlay(QWidget):
                 self._macaron_drag_pt  = QPoint(int(mcx), int(mby))
                 self.setCursor(Qt.CursorShape.ClosedHandCursor)
                 return
+        # Grab the beach ball to drag it.
+        if self._ball is not None:
+            _bcx, _bcy = self._ball
+            if ((event.pos().x() - _bcx) ** 2 + (event.pos().y() - _bcy) ** 2
+                    <= (self._ball_radius + 4) ** 2):
+                self._ball_grab     = True
+                self._ball_grab_off = event.pos() - QPoint(int(_bcx), int(_bcy))
+                self._ball_drag_pt  = QPoint(int(_bcx), int(_bcy))
+                self.setCursor(Qt.CursorShape.ClosedHandCursor)
+                return
         # Grab Sao to drag her (only when she's actually visible).
         if (self._cat is not None and not self._sao_in_hut
                 and not self._cat_working and not self._cat_hidden):
@@ -1235,6 +1284,10 @@ class CatOverlay(QWidget):
             self._macaron_drag_pt = event.pos() - self._macaron_grab_off
             self.update()
             return
+        if self._ball_grab:
+            self._ball_drag_pt = event.pos() - self._ball_grab_off
+            self.update()
+            return
         if self._hut_dragging:
             self._hut_x = max(20, min(self.width() - 20, event.pos().x()))
             self.update()
@@ -1264,6 +1317,10 @@ class CatOverlay(QWidget):
             return
         if self._macaron_grab:
             self._macaron_grab = False
+            self.setCursor(Qt.CursorShape.ArrowCursor)
+            return
+        if self._ball_grab:
+            self._ball_grab = False
             self.setCursor(Qt.CursorShape.ArrowCursor)
             return
         if self._hut_dragging:
@@ -1601,6 +1658,14 @@ class CatOverlay(QWidget):
         if self._block_mode and self._garden_floor_y > 0:
             self._draw_block_grid(painter)
 
+        # Beach ball — bouncy toy.
+        if self._ball is not None:
+            if self._ball_grab:
+                self._draw_ball(painter, self._ball_drag_pt.x(), self._ball_drag_pt.y())
+            else:
+                _bcx, _bcy = self._ball
+                self._draw_ball(painter, _bcx, _bcy)
+
         # Macaron treat — drawn near world level so Sao can come eat it.
         if self._macaron is not None:
             if self._macaron_grab:
@@ -1735,6 +1800,37 @@ class CatOverlay(QWidget):
         painter.setPen(QColor(255, 255, 255, 215))
         _name = 'dirt' if self._block_style == blocks_data.STYLE_DIRT else 'grass'
         painter.drawText(gx, gy - 6, f'{_name}  ·  R switch  ·  Esc exit')
+
+    def _draw_ball(self, painter: QPainter, cx, cy) -> None:
+        """A beach ball: chosen colour, a couple of light stripes, a soft
+        highlight, and a black outline."""
+        r = self._ball_radius
+        cx, cy = int(cx), int(cy)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+        col = QColor(*self._ball_color)
+        # body
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(col)
+        painter.drawEllipse(QPoint(cx, cy), r, r)
+        # two lighter stripes (beach-ball panels), clipped to the ball
+        path = QPainterPath()
+        path.addEllipse(QPoint(cx, cy), float(r), float(r))
+        painter.save()
+        painter.setClipPath(path)
+        lighter = QColor(min(255, col.red() + 55), min(255, col.green() + 55),
+                         min(255, col.blue() + 55))
+        painter.setBrush(lighter)
+        painter.drawEllipse(QPoint(cx - r // 2, cy), r // 3, r)
+        painter.drawEllipse(QPoint(cx + r // 2, cy), r // 3, r)
+        # highlight
+        painter.setBrush(QColor(255, 255, 255, 130))
+        painter.drawEllipse(QPoint(cx - r // 3, cy - r // 3), r // 4, r // 4)
+        painter.restore()
+        # black outline
+        painter.setBrush(Qt.BrushStyle.NoBrush)
+        painter.setPen(QPen(QColor(20, 20, 24), 2))
+        painter.drawEllipse(QPoint(cx, cy), r, r)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing, False)
 
     def _draw_macaron_treat(self, painter: QPainter, cx, by, alpha: float = 1.0) -> None:
         """A small pink macaron (two shells + cream filling), centred at x=cx
@@ -1977,8 +2073,14 @@ class CatOverlay(QWidget):
             mcx, mby, _ma = self._macaron
             over_macaron = (abs(cursor.x() - mcx) < MACARON_HIT
                             and abs(cursor.y() - (mby - 6)) < MACARON_HIT)
-        interactive = (over_cat or over_flower or over_macaron
-                       or self._cursor_over_interior or self._macaron_grab)
+        over_ball = False
+        if self._ball is not None:
+            _bcx, _bcy = self._ball
+            over_ball = ((cursor.x() - _bcx) ** 2 + (cursor.y() - _bcy) ** 2
+                         <= (self._ball_radius + 4) ** 2)
+        interactive = (over_cat or over_flower or over_macaron or over_ball
+                       or self._cursor_over_interior or self._macaron_grab
+                       or self._ball_grab)
         self._set_click_through(not interactive)
         self.setCursor(Qt.CursorShape.ClosedHandCursor   if self.is_dragging else
                        Qt.CursorShape.OpenHandCursor     if over_cat else

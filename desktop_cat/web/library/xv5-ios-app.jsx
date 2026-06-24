@@ -1152,6 +1152,21 @@ function IOSSettingsScreen({ bridge, onSyncCanvas, syncMsg, light, setLight }) {
           <Switch on={!!(world && world.block_mode)}
             onClick={() => patchWorld({ block_mode: !(world && world.block_mode) })} />
         </Row>
+        <Row k="Beach ball 🏖️" sub="Drop a bouncy ball — Sao bats it around with her paw. Pick its colour →">
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <input type="color"
+              value={(world && world.ball_color) || '#eb5a5a'}
+              onChange={e => patchWorld({ ball_color: e.target.value })}
+              style={{ width: 28, height: 24, border: 'none', background: 'none', cursor: 'pointer' }} />
+            <button
+              onClick={() => { try { bridge && bridge.spawnBall && bridge.spawnBall(); } catch (e) {} }}
+              style={{ background: 'linear-gradient(135deg,#7fc5e8,#4aa3d6)', color: '#0c2a3a',
+                       border: 'none', borderRadius: 10, padding: '6px 14px', fontWeight: 700,
+                       fontSize: 13, cursor: 'pointer' }}>
+              Drop ball
+            </button>
+          </div>
+        </Row>
       </Grp>
 
       <Grp label="Window pinning">

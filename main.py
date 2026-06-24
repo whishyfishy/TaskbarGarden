@@ -83,6 +83,16 @@ _SAO_DONE_LINES = ('Nice work! 🌸', 'One down! ✨', 'Proud of you 💛',
                    'Lovely! 🌼', 'Look at you go! ⭐')
 _SAO_EAT_LINES  = ('nom nom ♡', 'mmm! 🍪', 'tasty~', 'yum! ♡', 'so good!')
 MACARON_NOTICE_PX = 480   # she only chases/eats a treat within this horizontal range
+# Beach ball — floaty (low gravity, air-filled bounce) toy Sao bats with her paw.
+BALL_RADIUS      = 16
+BALL_GRAVITY     = 0.5     # low → it falls gently (air inside)
+BALL_RESTITUTION = 0.72    # bounciness
+BALL_AIR         = 0.992   # gentle drag
+BALL_REST_VY     = 1.3     # below this bounce speed at the floor → it settles
+BALL_KICK        = 9.0     # horizontal impulse from a bat
+BALL_POP         = 7.0     # upward impulse from a bat
+BALL_NOTICE      = 96      # how close (horizontal) before she bats it
+BALL_PUNCH_CD    = 36      # ticks between bats (it's a toy, no hard rate-limit)
 
 # Taskbar drop — Sao occasionally hops down into the taskbar to walk around
 TASKBAR_DROP_CHANCE  = 0.38   # probability per wander-change when on floor
@@ -333,6 +343,17 @@ def _block_traverse(state, prev, bplats):
         new_x = p.left - state.width if right else p.right
         return replace(state, x=float(new_x), vx=0.0)
     return state
+
+
+def _hex_to_rgb(h):
+    """'#eb5a5a' → (235, 90, 90), or None if unparseable."""
+    try:
+        h = (h or '').lstrip('#')
+        if len(h) == 6:
+            return (int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16))
+    except (ValueError, TypeError):
+        pass
+    return None
 
 
 def _snap_drop_platform(state, platforms):
@@ -1352,6 +1373,10 @@ def main():
             overlay.set_grass_bed(_ws.get('grass_bed', 0))
         if hasattr(overlay, 'set_extra_tall_grass'):
             overlay.set_extra_tall_grass(bool(_ws.get('extra_tall_grass', False)))
+        if hasattr(overlay, 'set_ball_color'):
+            _bc = _hex_to_rgb(_ws.get('ball_color', '#eb5a5a'))
+            if _bc:
+                overlay.set_ball_color(_bc)
         if hasattr(overlay, 'set_rock_density'):
             overlay.set_rock_density(_ws.get('rock_density', 0))
         if hasattr(overlay, 'set_block_mode'):
@@ -1396,6 +1421,10 @@ def main():
             overlay.set_grass_bed(settings.get('grass_bed', 0))
         if hasattr(overlay, 'set_extra_tall_grass'):
             overlay.set_extra_tall_grass(bool(settings.get('extra_tall_grass', False)))
+        if hasattr(overlay, 'set_ball_color'):
+            _bc = _hex_to_rgb(settings.get('ball_color', '#eb5a5a'))
+            if _bc:
+                overlay.set_ball_color(_bc)
         if hasattr(overlay, 'set_rock_density'):
             overlay.set_rock_density(settings.get('rock_density', 0))
         if hasattr(overlay, 'set_block_mode'):
@@ -1587,6 +1616,9 @@ def main():
     macaron            = None    # {'x','y','vy','state'} treat on the desktop, or None
     macaron_eat_ticks  = 0       # ticks held in the 'eating' interact pose
     meal_nap_timer     = 0       # >0 → counting down to a post-macaron food-coma nap
+    ball               = None    # {'x','y','vx','vy'} beach ball (centre), or None
+    ball_punch_cd      = 0       # ticks until she may bat the ball again
+    attack_target      = 'cursor'  # what the current punch targets: 'cursor' | 'ball'
     # Pester tracking — how many rapid passes the cursor has made over Sao.
     pester_count       = 0    # passes counted in the current window
     pester_decay       = 0    # ticks left before the count resets (rolling window)
@@ -1714,7 +1746,7 @@ def main():
         nonlocal punch_window_ticks, punch_count_3min, hover_stop_ticks
         nonlocal pester_count, pester_decay, pester_was_over, was_dragging
         nonlocal nap_ticks, napping, nap_cursor_ref, macaron, macaron_eat_ticks
-        nonlocal meal_nap_timer
+        nonlocal meal_nap_timer, ball, ball_punch_cd, attack_target
         nonlocal jump_ticks, jump_target_hwnd, jump_attempts, jump_cooldown
         nonlocal wind_up_ticks, pending_jump_target
         nonlocal walk_around_dir
@@ -2523,6 +2555,39 @@ def main():
                         macaron['state'] = 'resting'
             macaron['x'] = max(8.0, min(float(screen_w - 8), macaron['x']))
             overlay.set_macaron(macaron['x'], macaron['y'], 1.0)
+
+        # ── Beach ball: spawn + floaty bounce physics (always runs) ────────
+        if overlay.consume_ball_request() and ball is None:
+            ball = {'x': float(screen_w * 0.5), 'y': float(screen_floor - 120),
+                    'vx': 0.0, 'vy': 0.0}
+        if ball is not None:
+            R = BALL_RADIUS
+            if overlay.ball_grabbed():
+                _bp = overlay.ball_drag_pos()
+                _nx, _ny = float(_bp.x()), float(_bp.y())
+                ball['vx'] = (_nx - ball['x']) * 0.5   # throw velocity on release
+                ball['vy'] = (_ny - ball['y']) * 0.5
+                ball['x'], ball['y'] = _nx, _ny
+            else:
+                ball['vy'] += BALL_GRAVITY
+                ball['vx'] *= BALL_AIR
+                ball['vy'] *= BALL_AIR
+                ball['x'] += ball['vx']
+                ball['y'] += ball['vy']
+                if ball['y'] + R >= screen_floor:               # floor bounce
+                    ball['y'] = float(screen_floor - R)
+                    ball['vy'] = (-ball['vy'] * BALL_RESTITUTION
+                                  if ball['vy'] > BALL_REST_VY else 0.0)
+                    ball['vx'] *= 0.96                            # rolling friction
+                if ball['x'] - R < 0:                             # walls
+                    ball['x'] = float(R); ball['vx'] = abs(ball['vx']) * BALL_RESTITUTION
+                elif ball['x'] + R > screen_w:
+                    ball['x'] = float(screen_w - R); ball['vx'] = -abs(ball['vx']) * BALL_RESTITUTION
+                if ball['y'] - R < 0:                             # ceiling
+                    ball['y'] = float(R); ball['vy'] = abs(ball['vy']) * BALL_RESTITUTION
+            if ball_punch_cd > 0:
+                ball_punch_cd -= 1
+            overlay.set_ball(ball['x'], ball['y'])
 
         if idle_pause > 0:
             idle_pause -= 1
@@ -3373,55 +3438,88 @@ def main():
                 jab = 0.0   # still winding up — stays planted
             cat = replace(cat, x=attack_origin_x + attack_dir * jab, vx=float(attack_dir))
             if elapsed == PUNCH_SWING_ELAPSED:
-                cursor_slide_vx = float(attack_dir) * PUNCH_CURSOR_KICK   # the hit lands
-                # Immediate first shove so the knock is never missed even if the
-                # slide loop hiccups.  Sideways kick + a one-time upward pop so
-                # the cursor gets knocked up-and-away, not straight across.
-                try:
-                    _hp = ctypes.wintypes.POINT()
-                    ctypes.windll.user32.GetCursorPos(ctypes.byref(_hp))
-                    ctypes.windll.user32.SetCursorPos(
-                        _hp.x + int(attack_dir * PUNCH_CURSOR_KICK),
-                        _hp.y - PUNCH_CURSOR_KICK_UP)
-                except Exception:
-                    pass
+                if attack_target == 'ball':
+                    if ball is not None:
+                        ball['vx'] = float(attack_dir) * BALL_KICK   # bat it away
+                        ball['vy'] = -BALL_POP                       # and up a bit
+                else:
+                    cursor_slide_vx = float(attack_dir) * PUNCH_CURSOR_KICK
+                    # Immediate first shove + a one-time upward pop.
+                    try:
+                        _hp = ctypes.wintypes.POINT()
+                        ctypes.windll.user32.GetCursorPos(ctypes.byref(_hp))
+                        ctypes.windll.user32.SetCursorPos(
+                            _hp.x + int(attack_dir * PUNCH_CURSOR_KICK),
+                            _hp.y - PUNCH_CURSOR_KICK_UP)
+                    except Exception:
+                        pass
             attack_ticks -= 1
             if attack_ticks <= 0:
                 cat = replace(cat, x=attack_origin_x, vx=0.0)
-                attack_phase     = ''
-                attack_cooldown  = PUNCH_COOLDOWN
-                punch_count_3min += 1   # used one of her 2 punches this window
+                attack_phase = ''
+                if attack_target == 'ball':
+                    ball_punch_cd = BALL_PUNCH_CD
+                else:
+                    attack_cooldown  = PUNCH_COOLDOWN
+                    punch_count_3min += 1   # used one of her 2 cursor punches
+                attack_target = 'cursor'
 
         elif attack_phase == 'approach':
-            _cur    = overlay.mapFromGlobal(QCursor.pos())
             _cat_cx = cat.x + cat.width / 2
-            _dx     = _cur.x() - _cat_cx
             approach_ticks += 1
-            if (not cat.grounded or approach_ticks > PUNCH_APPROACH_MAX
-                    or _cur.y() < screen_floor - PUNCH_FLOOR_PX):
-                attack_phase    = ''            # cursor left the zone / gave up
-                attack_cooldown = 15
-                cat = stop_walking(cat)
-            elif abs(_dx) <= PUNCH_RANGE:
-                attack_phase    = 'punch'       # close enough — swing
-                attack_ticks    = PUNCH_ANIM_TICKS
-                attack_dir      = 1 if _dx >= 0 else -1
-                attack_origin_x = float(cat.x)
-                cat = stop_walking(cat)
+            if attack_target == 'ball':
+                # Chase the bouncing ball; bat it once she's close + grounded.
+                if ball is None or not cat.grounded or approach_ticks > PUNCH_APPROACH_MAX:
+                    attack_phase  = ''
+                    attack_target = 'cursor'
+                    attack_cooldown = 10
+                    cat = stop_walking(cat)
+                else:
+                    _dx = ball['x'] - _cat_cx
+                    if abs(_dx) <= PUNCH_RANGE + BALL_RADIUS:
+                        attack_phase    = 'punch'
+                        attack_ticks    = PUNCH_ANIM_TICKS
+                        attack_dir      = 1 if _dx >= 0 else -1
+                        attack_origin_x = float(cat.x)
+                        cat = stop_walking(cat)
+                    else:
+                        _run = abs(_dx) > 120
+                        cat = walk(cat, 1 if _dx > 0 else -1, run=_run)
+                        anim_override = 'run' if _run else None
             else:
-                # Run toward the cursor using the normal run physics (velocity
-                # is integrated by apply_physics), so it looks like a real
-                # run-up, not a teleport.
-                cat = walk(cat, 1 if _dx > 0 else -1, run=True)
-                anim_override = 'run'
+                _cur = overlay.mapFromGlobal(QCursor.pos())
+                _dx  = _cur.x() - _cat_cx
+                if (not cat.grounded or approach_ticks > PUNCH_APPROACH_MAX
+                        or _cur.y() < screen_floor - PUNCH_FLOOR_PX):
+                    attack_phase    = ''            # cursor left the zone / gave up
+                    attack_cooldown = 15
+                    cat = stop_walking(cat)
+                elif abs(_dx) <= PUNCH_RANGE:
+                    attack_phase    = 'punch'       # close enough — swing
+                    attack_ticks    = PUNCH_ANIM_TICKS
+                    attack_dir      = 1 if _dx >= 0 else -1
+                    attack_origin_x = float(cat.x)
+                    cat = stop_walking(cat)
+                else:
+                    cat = walk(cat, 1 if _dx > 0 else -1, run=True)
+                    anim_override = 'run'
 
         elif (cat.grounded and not is_jumping and attack_cooldown == 0
-              and taskbar_state == 'normal' and cat.on_hwnd is None
-              and punch_count_3min < PUNCH_MAX_PER_WINDOW):
-            # She gets annoyed when the cursor is repeatedly wiggled OVER her
-            # (PESTER_TRIGGER rapid passes) — then she runs at it and swings.
-            if pester_count >= PESTER_TRIGGER:
+              and taskbar_state == 'normal' and cat.on_hwnd is None):
+            # Bat a nearby ball (free play), else react to cursor pestering.
+            _started = False
+            if ball is not None and ball_punch_cd == 0:
+                _bdx = ball['x'] - (cat.x + cat.width / 2)
+                _ball_low = ball['y'] + BALL_RADIUS >= screen_floor - 36
+                if abs(_bdx) < BALL_NOTICE and _ball_low:
+                    attack_phase   = 'approach'
+                    attack_target  = 'ball'
+                    approach_ticks = 0
+                    _started = True
+            if (not _started and punch_count_3min < PUNCH_MAX_PER_WINDOW
+                    and pester_count >= PESTER_TRIGGER):
                 attack_phase   = 'approach'
+                attack_target  = 'cursor'
                 approach_ticks = 0
                 pester_count   = 0
                 pester_decay   = 0

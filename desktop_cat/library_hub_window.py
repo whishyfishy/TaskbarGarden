@@ -556,6 +556,17 @@ class SaoBridge(QObject):
         except Exception as e:
             print(f'[feedMacaron] {e}')
 
+    @pyqtSlot()
+    def spawnBall(self) -> None:
+        """Drop a bouncy beach ball onto the desktop for Sao to bat around."""
+        try:
+            from desktop_cat import pin_registry
+            ov = pin_registry.get_overlay()
+            if ov is not None and hasattr(ov, 'request_ball'):
+                ov.request_ball()
+        except Exception as e:
+            print(f'[spawnBall] {e}')
+
     @pyqtSlot(result=str)
     def getPinnedWindows(self) -> str:
         """[{hwnd, title}, ...] of currently-pinned windows for Settings."""
