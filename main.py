@@ -1596,6 +1596,12 @@ def main():
     wander_ticks     = 0
     wander_dir       = random.choice([-1, 1])
     wander_run_ticks = 0    # ticks remaining in a run burst (0 = walking)
+    # Graceful turn — an occasional lifelike direction change (decelerate, stop,
+    # a little backwards shuffle, then flip).  '' = not turning.
+    turn_phase       = ''   # '' | 'decel' | 'pause' | 'back'
+    turn_ticks       = 0
+    turn_old_dir     = 1    # direction she was facing
+    turn_new_dir     = 1    # direction she'll commit to
     idle_pause       = 0
     is_jumping       = False
     # Cursor-punch state
@@ -1747,6 +1753,7 @@ def main():
         nonlocal pester_count, pester_decay, pester_was_over, was_dragging
         nonlocal nap_ticks, napping, nap_cursor_ref, macaron, macaron_eat_ticks
         nonlocal meal_nap_timer, ball, ball_punch_cd, attack_target
+        nonlocal turn_phase, turn_ticks, turn_old_dir, turn_new_dir
         nonlocal jump_ticks, jump_target_hwnd, jump_attempts, jump_cooldown
         nonlocal wind_up_ticks, pending_jump_target
         nonlocal walk_around_dir
@@ -2641,6 +2648,38 @@ def main():
                     and (_idle_nap or _coma)):
                 napping = True
 
+        # ── Graceful turn ─────────────────────────────────────────────────
+        # An occasional lifelike reversal: decelerate → stop → a little
+        # backwards shuffle (moonwalk, still facing the old way) → flip.  Drives
+        # her fully while active; the wander logic resumes after.
+        if turn_phase and cat.grounded and taskbar_state == 'normal':
+            turn_ticks += 1
+            _face = None
+            if turn_phase == 'decel':
+                frac = min(1.0, turn_ticks / 12.0)
+                cat  = replace(cat, vx=float(turn_old_dir) * _phys.WALK_SPEED * (1.0 - frac))
+                _anim = 'walk'
+                if turn_ticks >= 12:
+                    turn_phase = 'pause'; turn_ticks = 0; cat = stop_walking(cat)
+            elif turn_phase == 'pause':
+                cat = stop_walking(cat)
+                _anim = 'idle'
+                if turn_ticks >= 8:
+                    turn_phase = 'back'; turn_ticks = 0
+            else:  # 'back' — moonwalk: drift the NEW way while FACING the old way
+                cat   = replace(cat, vx=float(turn_new_dir) * _phys.WALK_SPEED * 0.45)
+                _face = turn_old_dir
+                _anim = 'walk'
+                if turn_ticks >= 14:
+                    wander_dir = turn_new_dir
+                    turn_phase = ''
+            overlay.update_state(cat, platforms, occluded=is_occluded,
+                                 anim_override=_anim, face_override=_face)
+            tick_count += 1
+            return
+        elif turn_phase:
+            turn_phase = ''   # lost the floor / left normal state → abort the turn
+
         # ── Macaron feeding: chase / jump-at / eat the treat, but only when
         #    it's within her view range (she ignores one across the screen). ──
         if (macaron is not None and cat.grounded and taskbar_state == 'normal'
@@ -3192,13 +3231,22 @@ def main():
                 tick_count += 1
                 return
 
-            # Force direction reversal at screen edges
+            # Force direction reversal at screen edges — sometimes with a
+            # graceful turn (she's "next to a wall"), otherwise an instant flip.
             if cat.x <= 1.0 and wander_dir == -1:
-                wander_dir       = 1
                 wander_run_ticks = 0
+                if turn_phase == '' and cat.grounded and random.random() < 0.5:
+                    turn_phase = 'decel'; turn_ticks = 0
+                    turn_old_dir = -1; turn_new_dir = 1
+                else:
+                    wander_dir = 1
             elif cat.x >= screen_w - cat.width - 1.0 and wander_dir == 1:
-                wander_dir       = -1
                 wander_run_ticks = 0
+                if turn_phase == '' and cat.grounded and random.random() < 0.5:
+                    turn_phase = 'decel'; turn_ticks = 0
+                    turn_old_dir = 1; turn_new_dir = -1
+                else:
+                    wander_dir = -1
 
             wander_ticks += 1
             if wander_ticks >= WANDER_CHANGE_TICKS:
@@ -3234,7 +3282,15 @@ def main():
                     wander_run_ticks  = 0
                 else:
                     # 40% stop, 30% each direction; only 35% of moves become runs
+                    _prev_dir  = wander_dir
                     wander_dir = random.choices([-1, 0, 1], weights=[3, 4, 3])[0]
+                    # Occasionally a real reversal gets a graceful turn instead
+                    # of an instant flip (random, ~20%).
+                    if (wander_dir == -_prev_dir and _prev_dir != 0
+                            and turn_phase == '' and cat.grounded
+                            and random.random() < 0.2):
+                        turn_phase = 'decel'; turn_ticks = 0
+                        turn_old_dir = _prev_dir; turn_new_dir = wander_dir
                     if wander_dir != 0:
                         is_run_trip = random.random() < 0.35
                         if is_run_trip:

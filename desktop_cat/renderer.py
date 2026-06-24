@@ -1095,7 +1095,8 @@ class CatOverlay(QWidget):
                      wind_up_frac: float = 0.0,
                      anim_override: str | None = None,
                      chasing_butterfly: bool = False,
-                     scared_of_orc: bool = False) -> None:
+                     scared_of_orc: bool = False,
+                     face_override: 'int | None' = None) -> None:
         self._cat       = cat
         self._platforms = platforms
         self._occluded  = occluded
@@ -1180,6 +1181,7 @@ class CatOverlay(QWidget):
                 vy=cat.vy,
                 grounded=cat.grounded,
                 wind_up_frac=wind_up_frac,
+                face_override=face_override,
             )
             if (self._is_interacting
                     and self._animator.cycle_just_completed

@@ -257,10 +257,14 @@ class Animator:
 
     def update(self, anim_name: str, vx: float,
                vy: float = 0.0, grounded: bool = True,
-               wind_up_frac: float = 0.0) -> None:
+               wind_up_frac: float = 0.0, face_override: 'int | None' = None) -> None:
         """Advance one tick. Call exactly once per game tick."""
-        # Facing direction: only update from horizontal velocity
-        if vx > 0.5:
+        # Facing direction.  Normally derived from horizontal velocity, but a
+        # face_override (1=right, -1=left) can force it — used for the
+        # backwards-shuffle ("moonwalk") part of a graceful turn.
+        if face_override is not None:
+            self.facing_right = face_override > 0
+        elif vx > 0.5:
             self.facing_right = True
         elif vx < -0.5:
             self.facing_right = False
