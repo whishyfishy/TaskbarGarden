@@ -1816,7 +1816,7 @@ class CatOverlay(QWidget):
         painter.drawEllipse(QPoint(cx, cy), r, r)
         # two lighter stripes (beach-ball panels), clipped to the ball
         path = QPainterPath()
-        path.addEllipse(QPoint(cx, cy), float(r), float(r))
+        path.addEllipse(float(cx - r), float(cy - r), float(2 * r), float(2 * r))
         painter.save()
         painter.setClipPath(path)
         lighter = QColor(min(255, col.red() + 55), min(255, col.green() + 55),
