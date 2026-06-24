@@ -509,8 +509,9 @@ class FriendBug:
             self.x += self.vx + perp_x * bob
             self.y += self.vy + perp_y * bob
             # Gently fade as they flee, so a curved path that loops back on
-            # screen still always dies instead of orbiting forever.
-            self.alpha = max(0, self.alpha - 3)
+            # screen still always dies instead of orbiting forever.  Slow fade
+            # (~1.5/tick) so they linger about twice as long as before.
+            self.alpha = max(0, self.alpha - 1.5)
 
     @property
     def alive(self) -> bool:

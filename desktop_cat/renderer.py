@@ -1635,6 +1635,13 @@ class CatOverlay(QWidget):
         near = blocks_data.BLOCK_FADE_NEAR
         far  = blocks_data.BLOCK_FADE_FAR
         S = blocks_data.BLOCK_SIZE
+        # If a macaron is resting on a block, keep that block at least partly
+        # visible so the treat doesn't look like it's floating.
+        _mac_cell = None
+        if self._macaron is not None:
+            _mcx, _mby, _ma = self._macaron
+            # The macaron's bottom rests ON the block top, so probe just below it.
+            _mac_cell = blocks_data.cell_at(_mcx, _mby + 2, floor)
         for (c, r), style in self._blocks.items():
             x, y, _w, _h = blocks_data.cell_rect(c, r, floor)
             if self._block_mode or cat is None:
@@ -1642,10 +1649,12 @@ class CatOverlay(QWidget):
             else:
                 bx, by = x + S / 2, y + S / 2
                 d = math.hypot(bx - cat_cx, by - cat_cy)
-                if d >= far:
-                    continue
                 alpha = 1.0 if d <= near else (far - d) / float(far - near)
-            painter.setOpacity(alpha)
+                if (c, r) == _mac_cell:
+                    alpha = max(alpha, 0.5)   # treat sits here → stay semi-visible
+                elif d >= far:
+                    continue
+            painter.setOpacity(max(0.0, alpha))
             painter.drawPixmap(x, y, self._block_pixmap(style))
         painter.setOpacity(1.0)
 

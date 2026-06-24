@@ -2014,15 +2014,18 @@ def main():
         # ── Wandering ABug3 — one per equipped slot, drifts freely like a butterfly ──
         # Count by origin='wanderer' — stable across state transitions (wandering/approaching/attached).
         _abug3_slots = inventory.get('abug_slots', []).count('abug3')
+        # Keep a couple wandering at once (like the butterflies) whenever they're
+        # enabled at all — not just one.
+        _desired_wanderers = max(2, _abug3_slots) if _abug3_slots > 0 else 0
         _wanderer_count = sum(1 for _fb in friend_bugs if _fb.origin == 'wanderer')
         # Remove excess wanderers when ABug3 is unequipped from slots
-        if _wanderer_count > _abug3_slots:
-            _to_remove = _wanderer_count - _abug3_slots
+        if _wanderer_count > _desired_wanderers:
+            _to_remove = _wanderer_count - _desired_wanderers
             for _xfb in list(friend_bugs):
                 if _xfb.origin == 'wanderer' and _to_remove > 0:
                     friend_bugs.remove(_xfb)
                     _to_remove -= 1
-        elif _wanderer_count < _abug3_slots:
+        elif _wanderer_count < _desired_wanderers:
             _from_left = random.random() < 0.5
             _wx = -14.0 if _from_left else float(screen_w + 14)
             _wy = random.uniform(screen_floor * 0.15, screen_floor * 0.85)
@@ -2292,7 +2295,7 @@ def main():
                             # with a slightly varied speed, a gentle curve, and
                             # a flap-driven bob so the escape reads as organic.
                             _ang = random.uniform(0.0, math.tau)
-                            _spd = random.uniform(2.8, 5.6)
+                            _spd = random.uniform(1.8, 3.6)   # a bit slower
                             _fb.vx = math.cos(_ang) * _spd
                             _fb.vy = math.sin(_ang) * _spd
                             # Curve: small per-tick turn, random sign so some
@@ -2479,7 +2482,12 @@ def main():
 
         if idle_pause > 0:
             idle_pause -= 1
-            overlay.update_state(cat, platforms, wind_up_frac=0.0)
+            # Zero her velocity + force the idle animation, otherwise the
+            # leftover run/walk speed makes the animator hold a frozen run frame
+            # (or flicker between two) for the whole pause.
+            cat = stop_walking(cat)
+            overlay.update_state(cat, platforms, wind_up_frac=0.0,
+                                 anim_override='idle')
             tick_count += 1
             return
 
@@ -2509,11 +2517,11 @@ def main():
                 return
         else:
             nap_ticks = 0 if _near else nap_ticks + 1
-            # She gets sleepy in the evening — after 9 PM (and before 6 AM) she
-            # dozes off much sooner, so napping is more common at night.
-            _hr = _datetime.now().hour
-            _thresh = NAP_AFTER_TICKS * (0.4 if (_hr >= 21 or _hr < 6) else 1.0)
-            # Post-macaron food coma: once the timer elapses she nods off.
+            # Idle-triggered napping happens ONLY at night (after 9 PM, before
+            # 6 AM) — during the day a parked mouse never makes her sleep; only
+            # a post-macaron food coma does.  Keeps her awake while you work.
+            _night = _datetime.now().hour >= 21 or _datetime.now().hour < 6
+            _idle_nap = _night and nap_ticks >= NAP_AFTER_TICKS * 0.4
             _coma = False
             if meal_nap_timer > 0:
                 meal_nap_timer -= 1
@@ -2521,7 +2529,7 @@ def main():
                     _coma = True
             if (cat.grounded and taskbar_state == 'normal' and not is_jumping
                     and not overlay.is_dragging and macaron is None
-                    and (nap_ticks >= _thresh or _coma)):
+                    and (_idle_nap or _coma)):
                 napping = True
 
         # ── Macaron feeding: chase / jump-at / eat the treat, but only when
