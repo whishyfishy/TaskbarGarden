@@ -337,10 +337,16 @@ def _block_traverse(state, prev, bplats):
                    ((not right) and pcl >= p.right and cl < p.right)
         if not crossing:
             continue
-        if feet - p.top <= STEP and not _has_block_above(p):
+        step_h = feet - p.top
+        if step_h <= STEP and not _has_block_above(p):
             return replace(state, y=p.top - state.height,
-                           grounded=True, on_hwnd=p.hwnd)   # step up onto it
-        # Too tall, or a wall with no headroom → stop against it.
+                           grounded=True, on_hwnd=p.hwnd)   # low step → climb up
+        # Too tall to step.  If it has headroom and is reachable, HOP onto it
+        # (so a single floating/high block doesn't trap her — e.g. mid ball
+        # chase, where she can't otherwise jump).  Else it's a real wall → stop.
+        if step_h <= JUMP_MAX_HEIGHT and not _has_block_above(p):
+            power = math.sqrt(2 * GRAVITY * (step_h + 14))
+            return replace(state, vy=-power, grounded=False)   # keep vx → arcs onto it
         new_x = p.left - state.width if right else p.right
         return replace(state, x=float(new_x), vx=0.0)
     return state
@@ -3248,14 +3254,14 @@ def main():
             # graceful turn (she's "next to a wall"), otherwise an instant flip.
             if cat.x <= 1.0 and wander_dir == -1:
                 wander_run_ticks = 0
-                if turn_phase == '' and cat.grounded and random.random() < 0.5:
+                if turn_phase == '' and cat.grounded and random.random() < 0.75:
                     turn_phase = 'decel'; turn_ticks = 0
                     turn_old_dir = -1; turn_new_dir = 1
                 else:
                     wander_dir = 1
             elif cat.x >= screen_w - cat.width - 1.0 and wander_dir == 1:
                 wander_run_ticks = 0
-                if turn_phase == '' and cat.grounded and random.random() < 0.5:
+                if turn_phase == '' and cat.grounded and random.random() < 0.75:
                     turn_phase = 'decel'; turn_ticks = 0
                     turn_old_dir = 1; turn_new_dir = -1
                 else:
@@ -3297,11 +3303,11 @@ def main():
                     # 40% stop, 30% each direction; only 35% of moves become runs
                     _prev_dir  = wander_dir
                     wander_dir = random.choices([-1, 0, 1], weights=[3, 4, 3])[0]
-                    # Occasionally a real reversal gets a graceful turn instead
-                    # of an instant flip (random, ~20%).
+                    # A real reversal often gets a graceful turn instead of an
+                    # instant flip (~50% of reversals — still only some moves).
                     if (wander_dir == -_prev_dir and _prev_dir != 0
                             and turn_phase == '' and cat.grounded
-                            and random.random() < 0.2):
+                            and random.random() < 0.5):
                         turn_phase = 'decel'; turn_ticks = 0
                         turn_old_dir = _prev_dir; turn_new_dir = wander_dir
                     if wander_dir != 0:
