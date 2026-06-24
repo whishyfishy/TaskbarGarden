@@ -294,6 +294,47 @@ def aim_jump(cat: CatState, target: Platform) -> CatState:
     return replace(state, vx=vx * 0.5)         # 50% shorter horizontal
 
 
+def _block_traverse(state, prev, bplats):
+    """Smarter block traversal: when Sao walks into a placed block in her path,
+    auto-step UP onto it if it's a low step (~1 block), or stop at it if it's
+    too tall (placed blocks aren't general walls, so this only applies to them).
+    Cheap — iterates the cached block platforms only while she's walking, with a
+    quick x-proximity reject."""
+    if not bplats or not state.grounded or abs(state.vx) < 0.3:
+        return state
+    STEP  = blocks_data.BLOCK_SIZE + 4   # auto-step up to ~one block tall
+    feet  = state.y + state.height
+    right = state.vx > 0
+    cl, cr   = state.x, state.x + state.width
+    pcl, pcr = prev.x, prev.x + state.width
+
+    def _has_block_above(p):
+        # A block sitting directly on top of p → p is part of a wall, no headroom.
+        for q in bplats:
+            if q is p:
+                continue
+            if abs((q.y + q.h) - p.top) < 2 and q.x < p.x + p.w and q.x + q.w > p.x:
+                return True
+        return False
+
+    for p in bplats:
+        if cr < p.x - 4 or cl > p.x + p.w + 4:
+            continue                                  # not horizontally near
+        if feet <= p.top + 1 or state.y >= p.y + p.h:
+            continue                                  # not in her vertical path
+        crossing = (right and pcr <= p.left and cr > p.left) or \
+                   ((not right) and pcl >= p.right and cl < p.right)
+        if not crossing:
+            continue
+        if feet - p.top <= STEP and not _has_block_above(p):
+            return replace(state, y=p.top - state.height,
+                           grounded=True, on_hwnd=p.hwnd)   # step up onto it
+        # Too tall, or a wall with no headroom → stop against it.
+        new_x = p.left - state.width if right else p.right
+        return replace(state, x=float(new_x), vx=0.0)
+    return state
+
+
 def _snap_drop_platform(state, platforms):
     """When the user releases a drag, find a window ledge to drop Sao onto even
     if her feet aren't *exactly* on it — a forgiving catch so she doesn't fall
@@ -1920,6 +1961,9 @@ def main():
             cat = resolve_collision(cat, _vis_platforms, effective_floor,
                                     prev_state=prev_cat,
                                     ignore_hwnd=hop_down_ignore_hwnd)
+            # Auto-step up onto / stop at placed blocks in her path.
+            if blocks:
+                cat = _block_traverse(cat, prev_cat, _get_block_platforms())
             # Hard screen-edge walls — always clamp; kill momentum on impact
             _clamped_x = max(0.0, min(cat.x, screen_w - cat.width))
             _vx = cat.vx
