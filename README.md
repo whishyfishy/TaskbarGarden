@@ -5,13 +5,15 @@ Windows taskbar. She walks across your open windows, hops between them, ducks in
 your taskbar apps to "work," tends a small garden of flowers tied to your to‑dos,
 and is wrapped around a tiny productivity hub.
 
-> Windows only. Tuned for a single monitor.
+> Windows only. Works best on a **single, standard‑scaled monitor** — very large
+> / high‑DPI displays may currently render her small in a corner (a known issue
+> being worked on).
 
-### [⬇️ Download Sao for Windows](https://github.com/whishyfishy/TaskbarGarden/releases/download/v1.0/Sao-v1.0.zip)
+### [⬇️ Download Sao for Windows](https://github.com/whishyfishy/TaskbarGarden/releases/latest/download/Sao-Windows.zip)
 
-[![Download Sao v1.0](https://img.shields.io/badge/⬇%20Download%20Sao%20v1.0-Windows-2ea44f?style=for-the-badge)](https://github.com/whishyfishy/TaskbarGarden/releases/download/v1.0/Sao-v1.0.zip)
+[![Download Sao](https://img.shields.io/badge/⬇%20Download%20Sao-Windows-2ea44f?style=for-the-badge)](https://github.com/whishyfishy/TaskbarGarden/releases/latest/download/Sao-Windows.zip)
 
-*One click downloads the zip — unzip anywhere and run `Sao.exe`. No Python needed.*
+*One click downloads the latest build — unzip anywhere and run `Sao.exe`. No Python needed.*
 *(Windows SmartScreen may warn about an unknown publisher — normal for unsigned apps — click **More info → Run anyway**.)*
 
 <!-- Demo GIF: drop a short screen recording at docs/demo.gif and it shows here. -->
@@ -35,6 +37,20 @@ and is wrapped around a tiny productivity hub.
   knuckle down.
 - **Window pinning** — keep any window always‑on‑top (click its edge or its
   taskbar icon), marked with a small dot near its close button.
+
+## Play & décor
+
+- **Blocks** — a tiny 2D‑Minecraft mode: place square blocks on a gap‑free grid
+  (dirt or grass, press **R** to switch), and Sao hops up to play on them.
+- **Beach ball** — drop a bouncy, floaty ball (pick its colour) and she chases it
+  around and bats it with her paw.
+- **Feed her** — drag a macaron out of the hub; she runs over, leaps for it, eats
+  it, and gets a sleepy food‑coma afterwards.
+- **Critters & lawn** — butterflies, ladybugs, friend‑bugs that land on a resting
+  cursor, and a rare snail. Tune the grass, a wind‑swept lawn, extra‑tall grass,
+  rocks, and a green "gween bean" mode in Settings.
+- **Naps** — leave her be (more in the evening) and she dozes off with little Z's;
+  butterflies may even land on her head.
 
 ## Run from source
 
