@@ -305,52 +305,6 @@ def aim_jump(cat: CatState, target: Platform) -> CatState:
     return replace(state, vx=vx * 0.5)         # 50% shorter horizontal
 
 
-def _block_traverse(state, prev, bplats):
-    """Smarter block traversal: when Sao walks into a placed block in her path,
-    auto-step UP onto it if it's a low step (~1 block), or stop at it if it's
-    too tall (placed blocks aren't general walls, so this only applies to them).
-    Cheap — iterates the cached block platforms only while she's walking, with a
-    quick x-proximity reject."""
-    if not bplats or not state.grounded or abs(state.vx) < 0.3:
-        return state
-    STEP  = blocks_data.BLOCK_SIZE + 4   # auto-step up to ~one block tall
-    feet  = state.y + state.height
-    right = state.vx > 0
-    cl, cr   = state.x, state.x + state.width
-    pcl, pcr = prev.x, prev.x + state.width
-
-    def _has_block_above(p):
-        # A block sitting directly on top of p → p is part of a wall, no headroom.
-        for q in bplats:
-            if q is p:
-                continue
-            if abs((q.y + q.h) - p.top) < 2 and q.x < p.x + p.w and q.x + q.w > p.x:
-                return True
-        return False
-
-    for p in bplats:
-        if cr < p.x - 4 or cl > p.x + p.w + 4:
-            continue                                  # not horizontally near
-        if feet <= p.top + 1 or state.y >= p.y + p.h:
-            continue                                  # not in her vertical path
-        crossing = (right and pcr <= p.left and cr > p.left) or \
-                   ((not right) and pcl >= p.right and cl < p.right)
-        if not crossing:
-            continue
-        step_h = feet - p.top
-        if step_h <= STEP and not _has_block_above(p):
-            return replace(state, y=p.top - state.height,
-                           grounded=True, on_hwnd=p.hwnd)   # low step → climb up
-        # Too tall to step.  If it has headroom and is reachable, HOP onto it
-        # (so a single floating/high block doesn't trap her — e.g. mid ball
-        # chase, where she can't otherwise jump).  Else it's a real wall → stop.
-        if step_h <= JUMP_MAX_HEIGHT and not _has_block_above(p):
-            power = math.sqrt(2 * GRAVITY * (step_h + 14))
-            return replace(state, vy=-power, grounded=False)   # keep vx → arcs onto it
-        new_x = p.left - state.width if right else p.right
-        return replace(state, x=float(new_x), vx=0.0)
-    return state
-
 
 def _hex_to_rgb(h):
     """'#eb5a5a' → (235, 90, 90), or None if unparseable."""
@@ -1170,12 +1124,10 @@ def main():
     # Snail — a rare, slow ambient critter that crawls across the floor and
     # tucks under a big rock.  Behaves like the ladybug (edge-spawn, cooldown).
     snails: list[Snail]          = []
-    # TEMP (testing): spawn constantly so the snail is easy to verify.  Revert
-    # to the rare values in the comments once confirmed working.
-    SNAIL_SPAWN_CHANCE           = 1.0           # rare: 1.0 / 1200
-    SNAIL_COOLDOWN_MIN           = 3 * 60        # rare: 4 * 60 * 60  (4 min)
-    SNAIL_COOLDOWN_MAX           = 6 * 60        # rare: 9 * 60 * 60  (9 min)
-    snail_cooldown: int          = 0             # rare: 3 * 60 * 60
+    SNAIL_SPAWN_CHANCE           = 1.0 / 1200    # per-tick once eligible (rare visitor)
+    SNAIL_COOLDOWN_MIN           = 4 * 60 * 60   # 4 min lockout between visits
+    SNAIL_COOLDOWN_MAX           = 9 * 60 * 60   # 9 min
+    snail_cooldown: int          = 3 * 60 * 60   # initial delay so she's not instant
     overlay.set_critters(bugs, butterflies, [], effects)
     overlay.set_friend_bugs(friend_bugs)
     overlay.set_lazy_bugs(lazy_bugs)
