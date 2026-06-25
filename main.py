@@ -2007,9 +2007,9 @@ def main():
             cat = resolve_collision(cat, _vis_platforms, effective_floor,
                                     prev_state=prev_cat,
                                     ignore_hwnd=hop_down_ignore_hwnd)
-            # Auto-step up onto / stop at placed blocks in her path.
-            if blocks:
-                cat = _block_traverse(cat, prev_cat, _get_block_platforms())
+            # (Blocks are pass-through horizontally — she walks through them and
+            # only lands on / jumps onto their tops.  The old auto-step / wall
+            # behaviour could trap her, so it's removed.)
             # Hard screen-edge walls — always clamp; kill momentum on impact
             _clamped_x = max(0.0, min(cat.x, screen_w - cat.width))
             _vx = cat.vx
@@ -2637,6 +2637,13 @@ def main():
                     or taskbar_state != 'normal' or macaron is not None):
                 napping   = False
                 nap_ticks = 0
+                # Any butterfly that landed on her head takes off as she wakes,
+                # so none are left frozen where her head used to be.
+                _hx = cat.x + cat.width / 2
+                for _bf in butterflies:
+                    if (getattr(_bf, 'state', '') == 'landed'
+                            and abs(_bf.x - _hx) < 42 and abs(_bf.y - cat.y) < 40):
+                        _bf._take_off()
                 # Startled awake by the cursor → a tiny hop.
                 if _near and cat.grounded and not overlay.is_dragging:
                     cat = jump(cat, power=JUMP_MIN_POWER)
