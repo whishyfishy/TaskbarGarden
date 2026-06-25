@@ -435,14 +435,18 @@ def main():
             _L.append(f"rounding_policy={app.highDpiScaleFactorRoundingPolicy()}")
         except Exception:
             pass
-        # Only write the log when something actually looks OFF — more than one
-        # monitor, or the overlay didn't end up covering the whole screen — so a
-        # healthy single-monitor user never gets a stray file, but an affected
-        # machine still captures the data to diagnose later.
-        _ov = overlay.geometry()
+        # Only write the log when something actually looks OFF, so a healthy
+        # machine never gets a stray file but an affected one captures the data.
+        # Compare the overlay's PHYSICAL footprint to the screen's: if Qt didn't
+        # scale the window (the "everything tiny in a corner" bug), its physical
+        # size will be smaller than the screen even though geometry() matches.
+        _ov   = overlay.geometry()
+        _odpr = overlay.devicePixelRatioF() or 1.0
+        _ov_phys_w = _ov.width()  * _odpr
+        _ov_phys_h = _ov.height() * _odpr
         _bad = (len(app.screens()) > 1
-                or _ov.width()  < screen_rect.width()  - 2
-                or _ov.height() < screen_rect.height() - 2)
+                or abs(_ov_phys_w - phys_screen_w) > 8
+                or abs(_ov_phys_h - phys_screen_h) > 8)
         if _bad:
             with open(os.path.join(os.path.expanduser('~'), 'sao_dpi_debug.log'),
                       'w', encoding='utf-8') as _df:
