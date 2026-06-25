@@ -435,9 +435,18 @@ def main():
             _L.append(f"rounding_policy={app.highDpiScaleFactorRoundingPolicy()}")
         except Exception:
             pass
-        with open(os.path.join(os.path.expanduser('~'), 'sao_dpi_debug.log'),
-                  'w', encoding='utf-8') as _df:
-            _df.write("\n".join(str(_x) for _x in _L) + "\n")
+        # Only write the log when something actually looks OFF — more than one
+        # monitor, or the overlay didn't end up covering the whole screen — so a
+        # healthy single-monitor user never gets a stray file, but an affected
+        # machine still captures the data to diagnose later.
+        _ov = overlay.geometry()
+        _bad = (len(app.screens()) > 1
+                or _ov.width()  < screen_rect.width()  - 2
+                or _ov.height() < screen_rect.height() - 2)
+        if _bad:
+            with open(os.path.join(os.path.expanduser('~'), 'sao_dpi_debug.log'),
+                      'w', encoding='utf-8') as _df:
+                _df.write("\n".join(str(_x) for _x in _L) + "\n")
     except Exception:
         pass
     # Expose the overlay to the hub bridge (e.g. hover-a-todo → highlight flower).
